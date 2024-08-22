@@ -1,130 +1,67 @@
-# Creating an ERC20
+# Explore Open Zeppelin
 
-## ERC20 Manual Creation
+## ERC20 OpenZeppelin
 
-Welcome Back! Having covered the basics, let's look at how we can manually create our own ERC20 token. This is going to be one of our fastest lessons yet!
+Welcome back! As mentioned in the closing of our last lesson, we could absolutely continue with manually building out a smart contract comprised of all the required functions to be compatible with the ERC20 standard, but wouldn't it be more convenient to use pre-deployed, audited, and ready-to-go contracts?
 
-### Setting Up Your Environment
-
-Open a terminal in Visual Studio Code and run the following:
-
-```bash
-mkdir foundry-erc20-f23
-cd foundry-erc20-f23
-code .
-```
-
-The above commands will create a new directory for our project, navigate into it, and open the directory in a new Visual Studio Code window.
-
-Once we have Visual Studio Code running, we need to initialize a blank Foundry project. Open up the terminal and execute the following command:
-
-```bash
-forge init
-```
-
-Completing these steps sets up a development environment with some convenient boilerplate layouts to work with.
-
-Go ahead and delete our 3 `Counter` examples so we can start with a clean slate.
-
-I'm going to show you 2 different ways to create our own token, first the hard way and then a much easier way!
-
-You can begin by creating a new token token our `src` directory named `ManualToken.sol`. We can start this contract the same way we've been practicing this whole time (you'll get really familiar with this bit).
-
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
-
-contract ManualToken {...}
-```
-
-Now, as we covered in the last lesson, all we need to do to make our token compatible is follow the **[ERC20 Token Standard](https://eips.ethereum.org/EIPS/eip-20)**. Essentially this means we need to include the required functions/methods for our deployment to follow this standard. Let's add thing functionality then!
-
-Let's start with name, decimals and totalSupply
-
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
-
-contract ManualToken {
-  function name() public pure returns (string memory) {
-    return "Manual Token";
-  }
-
-  function totalSupply() public pure returns (uint256) {
-    return 100 ether; // 100000000000000000000
-  }
-
-  function decimals() public pure returns (uint8) {
-    return 18;
-  }
-}
-```
+In this section, I'll guide you on using the OpenZeppelin Library to achieve this.
 
 > ❗ **NOTE**
-> Despite being an optional method, we're including `decimals` here as a point of clarification since we're declaring our total supply as 100 ether. 100 ether = 100 + 18 decimals places.
+> OpenZeppelin is renowned for its Smart Contract framework, offering a vast repository of audited contracts readily integratable into your codebase.
 
-The next functions required by the ERC20 standard are balanceOf and transfer, so let's apply those now.
+Access [OpenZeppelin's documentation](https://docs.openzeppelin.com/contracts/4.x/) via their official website. By navigating to [Products -> Contracts](https://www.openzeppelin.com/contracts), you can discover a vast array of ready-to-use contracts.
 
-```solidity// SPDX-License-Identifier: MIT
+Additionally, OpenZeppelin offers a contract wizard, streamlining the contract creation process — perfect for tokens, governances, or custom contracts.
+
+Let's leverage OpenZeppelin to create a new ERC20 Token. Create a new file within `src` named `OurToken.sol`. Once that's done, let's install the OpenZeppelin library into our contract.
+
+```bash
+forge install OpenZeppelin/openzeppelin-contracts --no-commit
+```
+
+Once installed you'll see the ERC20 contract from OpenZeppelin within `lib/openzeppelin-contracts/token/ERC20/ERC20.sol`. Let's add a remapping in our foundry.toml to make importing a little easier on us.Within foundry.toml add the line:
+
+```toml
+remappings = ["@openzeppelin=lib/openzeppelin-contracts"];
+```
+
+We can now import and inherit this contract into `OurToken.sol`!
+
+```solidity
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-contract ManualToken {
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-    function name() public pure returns(string memory) {
-        return "Manual Token";
-    }
-
-    function totalSupply() public pure returns (uint256){
-        return 100 ether; // 100000000000000000000
-    }
-
-    function decimals() public pure returns (uint8) {
-        return 18;
-    }
-
-    function balanceOf(address _owner) public pure returns (uint256){
-        return // ???
-    }
+contract OurToken is ERC20 {
+  //constructor goes here
 }
 ```
 
-Hmm, what is this function meant to return exactly? We're probably going to need a mapping to track the balances of each address...
-
-```solidity
-mapping(address => uint256) private s_balances;
-```
-
-So now our balanceOf function can return this mapped value based on the address parameter being passed.
-
-```solidity
-function balanceOf(address _owner) public pure returns (uint256) {
-  return balances[_owner];
-}
-```
-
-An interesting thing that comes to light from this function is - someone's balance of a token is really just some mapping on a smart contract that says `this number is associated with this address` That's it. All swaps, transfers and trades are represented as an updating to the balance of this mapping.
+By importing the OpenZeppelin implementation of ERC20 this way, we inherit all the functionality of the ERC20 standard with much less work and a level of confidence that the code has been testing and verified.
 
 > ❗ **PROTIP**
-> Our name function could also be represented by a public declaration such as `string public name = "ManualToken";`. This is because Solidity creates public getter functions when compiled for any publicly accessible storage variables!
+> If you're looking for an alternative library full of trusted contracts, I recommend looking at the **[Solmate Repo](https://github.com/transmissions11/solmate)** by Transmissions11.
 
-Our next required function is transfer:
+Now, we should recall that when inheriting from a contract with a constructor, our contract must fulfill the requirements of that constructor. We'll need to define details like a name and symbol for OurToken.
 
 ```solidity
-function transfer(address _to, uint256 _amount) public {
-  uint256 previousBalance = balanceOf(msg.sender) + balanceOf(_to);
-  s_balance[msg.sender] -= _amount;
-  s_balance[_to] += _amount;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
 
-  require(balanceOf(msg.sender) + balanceOf(_to) == previousBalances);
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+contract OurToken is ERC20 {
+  constructor(uint256 initialSupply) ERC20("OurToken", "OT") {
+    _mint(msg.sender, initialSupply);
+  }
 }
 ```
 
-So, a basic transfer function could look something like the above, a simple adjustment of the balances mapped to both the sender and receiver addresses in our contract.
+For the purposes of simple examples like this, I like to mint the initialSupply to the deployer/msg.sender, which I've demonstrated above.
 
-### Wrap Up
+As always we can perform a sanity check to assure things are working as expected by running `forge build`.
 
-We could absolutely continue going through each of the required functions outlined in the **[ERC20 Token Standard](https://eips.ethereum.org/EIPS/eip-20)** and eventually come out the other side with a compatible contract, but there's an easier way.
+Nailed it.
 
-In the next lesson we'll investigate an even easier method to spin up a standard ERC20 protocol, with the help of OpenZepplin.
-
-See you there!
+See you in the next lesson where we'll look into how to deploy this bad Larry.
