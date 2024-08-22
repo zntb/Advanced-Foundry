@@ -1,46 +1,130 @@
-# Introduction to ERC fundamentals and ERC20
+# Creating an ERC20
 
-### ERC20 Basics
+## ERC20 Manual Creation
 
-Welcome back! I hope you're ready to move into some more advanced concepts in Web3. In this section we're going to be diving into `ERC20s`, and how to develop, deploy and test them.
+Welcome Back! Having covered the basics, let's look at how we can manually create our own ERC20 token. This is going to be one of our fastest lessons yet!
 
-You can find the code associated with section in the **[GitHub repo](https://github.com/Cyfrin/foundry-full-course-f23)** associated with this course, and in the **[section repo specifically](https://github.com/Cyfrin/foundry-erc20-f23)**.
+### Setting Up Your Environment
 
-Before we rush into creating our own `ERC20 Token`, let's take a moment to learn _what_ an `ERC20` is, what `EIPs` are and where all these acronyms mean.
+Open a terminal in Visual Studio Code and run the following:
 
-### ERCs and EIPs
+```bash
+mkdir foundry-erc20-f23
+cd foundry-erc20-f23
+code .
+```
 
-The Web3 and blockchain ecosystem is fundamentally democratic and open source. As such major blockchains will often implement methods by which the community can submit suggestions for changes in methodologies and standards. These are typically known is `Improvement Proposals`, and in the Ethereum ecosystem they are `Ethereum Improvement proposals` (`EIPs`).
+The above commands will create a new directory for our project, navigate into it, and open the directory in a new Visual Studio Code window.
 
-If `EIPs` get enough traction to warrant genuine consideration they will often generate a `Request for Comments`, in Ethereum these are known as `Ethereum Request for Comments` (`ERCs`).
+Once we have Visual Studio Code running, we need to initialize a blank Foundry project. Open up the terminal and execute the following command:
 
-> ❗ **NOTE** > `EIPs` and `ERCs` are numbered chronologically! `ERC20` is the 20th request for comments that was created.
+```bash
+forge init
+```
 
-New `Improvement Proposals` and `Requests for Comments` are tracked on websites such as **[eips.ethereum.org](https://eips.ethereum.org/)**, where you can watch these proposals go through the process real time and be adopted or rejected by the community.
+Completing these steps sets up a development environment with some convenient boilerplate layouts to work with.
 
-### ERC20
+Go ahead and delete our 3 `Counter` examples so we can start with a clean slate.
 
-One of the most recognized `Ethereum Requests for Comments` is the **[ERC20 Token Standard](https://eips.ethereum.org/EIPS/eip-20)**. This is a proposal in which the methodology for creating and managing these tokens on the Ethereum blockchain was tabled.
+I'm going to show you 2 different ways to create our own token, first the hard way and then a much easier way!
 
-These tokens essentially exists as records of value within smart contracts on chain and this smart contract tracking of balances is a very powerful thing in Web3.
+You can begin by creating a new token token our `src` directory named `ManualToken.sol`. We can start this contract the same way we've been practicing this whole time (you'll get really familiar with this bit).
 
-_**Why make an ERC20?**_
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
 
-There are a few common reasons that someone may choose to launch an `ERC20 token`, but there's very little limit to the possibilities of their application in a digital space. A few common usecases include:
+contract ManualToken {...}
+```
 
-- Governance Tokens
-- Securing an underlying network
-- Synthetic Assets
-- Stable Coins
+Now, as we covered in the last lesson, all we need to do to make our token compatible is follow the **[ERC20 Token Standard](https://eips.ethereum.org/EIPS/eip-20)**. Essentially this means we need to include the required functions/methods for our deployment to follow this standard. Let's add thing functionality then!
 
-...and more.
+Let's start with name, decimals and totalSupply
 
-_**How do I build an ERC20?**_
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
 
-All anyone has to do to develop and `ERC20` is to deploy a smart contract which follows the **[token standard](https://eips.ethereum.org/EIPS/eip-20)**. This ultimate boils down to assuring our contract includes a number of necessary functions: `transfer`, `approve`, `name`, `symbol`, `balanceOf` etc.
+contract ManualToken {
+  function name() public pure returns (string memory) {
+    return "Manual Token";
+  }
+
+  function totalSupply() public pure returns (uint256) {
+    return 100 ether; // 100000000000000000000
+  }
+
+  function decimals() public pure returns (uint8) {
+    return 18;
+  }
+}
+```
+
+> ❗ **NOTE**
+> Despite being an optional method, we're including `decimals` here as a point of clarification since we're declaring our total supply as 100 ether. 100 ether = 100 + 18 decimals places.
+
+The next functions required by the ERC20 standard are balanceOf and transfer, so let's apply those now.
+
+```solidity// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
+
+contract ManualToken {
+
+    function name() public pure returns(string memory) {
+        return "Manual Token";
+    }
+
+    function totalSupply() public pure returns (uint256){
+        return 100 ether; // 100000000000000000000
+    }
+
+    function decimals() public pure returns (uint8) {
+        return 18;
+    }
+
+    function balanceOf(address _owner) public pure returns (uint256){
+        return // ???
+    }
+}
+```
+
+Hmm, what is this function meant to return exactly? We're probably going to need a mapping to track the balances of each address...
+
+```solidity
+mapping(address => uint256) private s_balances;
+```
+
+So now our balanceOf function can return this mapped value based on the address parameter being passed.
+
+```solidity
+function balanceOf(address _owner) public pure returns (uint256) {
+  return balances[_owner];
+}
+```
+
+An interesting thing that comes to light from this function is - someone's balance of a token is really just some mapping on a smart contract that says `this number is associated with this address` That's it. All swaps, transfers and trades are represented as an updating to the balance of this mapping.
+
+> ❗ **PROTIP**
+> Our name function could also be represented by a public declaration such as `string public name = "ManualToken";`. This is because Solidity creates public getter functions when compiled for any publicly accessible storage variables!
+
+Our next required function is transfer:
+
+```solidity
+function transfer(address _to, uint256 _amount) public {
+  uint256 previousBalance = balanceOf(msg.sender) + balanceOf(_to);
+  s_balance[msg.sender] -= _amount;
+  s_balance[_to] += _amount;
+
+  require(balanceOf(msg.sender) + balanceOf(_to) == previousBalances);
+}
+```
+
+So, a basic transfer function could look something like the above, a simple adjustment of the balances mapped to both the sender and receiver addresses in our contract.
 
 ### Wrap Up
 
-With a better understanding of what `ERCs/EIPs` are and where they come from, we'll be looking at how we can create and deploy our own simple `ERC20` token, in the next lesson.
+We could absolutely continue going through each of the required functions outlined in the **[ERC20 Token Standard](https://eips.ethereum.org/EIPS/eip-20)** and eventually come out the other side with a compatible contract, but there's an easier way.
 
-Exciting!
+In the next lesson we'll investigate an even easier method to spin up a standard ERC20 protocol, with the help of OpenZepplin.
+
+See you there!
