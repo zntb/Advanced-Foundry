@@ -1,54 +1,135 @@
-# Introduction to IPFS
+# Upload and use IPFS data (token URI)
 
-## IPFS
+## Using IPFS
 
-In this lesson let's dive into the Interplanetary File System (IPFS), how it works and what it means for decentralization of data. You can find additional information in the **[IPFS documentation](https://docs.ipfs.io/)**
+In a **[previous lesson](https://updraft.cyfrin.io/courses/advanced-foundry/how-to-create-an-NFT-collection/foundry-setup)** we discussed tokenUris and I walked you through an example of viewing the TokenURI of a token on OpenSea.
 
-So, how does IPFS work?
-
-It all starts with the data we want hosted. This can be more or less anything, code, images, some other file, it doesn't matter. As we know, any data can be hashed and this is essentially what IPFS Node's do initially. We provide our data to the IPFS network via a Node and the output is a unique hash that points to the location and details of that data.
-
-Each IPFS Node is once part of a much larger network and each of them constantly communicates to distribute data throughout the network. Any given node can choose to pin particular pieces of data to host/persist on the network.
-
-> ❗ **NOTE**
-> IPFS isn't able to execute logic or perform computation, it only serves as a means of decentralized storage
-
-What we would do then is upload our data to IPFS and then pin it in our node, assuring that the IPFS Hash of the data is available to anyone calling the network.
-
-Importantly, unlike a blockchain, where every node has a copy of the entire register, IPFS nodes can choose what they want to pin.
-
-### Using IPFS
-
-There are a few ways to actually use IPFS including a CLI installation, a browser companion and even a dedicated desktop application.
-
-Let's go ahead and **[install the IPFS Desktop application](https://docs.ipfs.tech/install/ipfs-desktop/)**. Once installed you should be able to open the application and navigate to a files section that looks like this:
-
-Pay no mind to all my pictures of cats. If you have no data to view, navigate to import in the top right and select any small file you don't mind being public.
-
-> ❗ **IMPORTANT**
-> Any data uploaded to this service will be _**public**_ by nature.
-
-Once a file is uploaded, you can click on that file and view that data.
-
-What makes this _really_ cool, is we can then copy the data's CID (content ID), as seen above and view our data within our browser by entering it into our address bar.
-
-```sh
-ipfs://<CID>
+```json
+{
+  "attributes": [
+    {
+      "trait_type": "Background",
+      "value": "Mint"
+    },
+    {
+      "trait_type": "Skin",
+      "value": "Dark Gray"
+    },
+    {
+      "trait_type": "Body",
+      "value": "Turtleneck Pink"
+    },
+    {
+      "trait_type": "Face",
+      "value": "Blushing"
+    },
+    {
+      "trait_type": "Head",
+      "value": "Headband"
+    }
+  ],
+  "description": "A collection 8888 Cute Chubby Pudgy Penquins sliding around on the freezing ETH blockchain.",
+  "image": "ipfs://QmNf1UsmdGaMbpatQ6toXSkzDpizaGmC9zfunCyoz1enD5/penguin/420.png",
+  "name": "Pudgy Penguin #420"
+}
 ```
 
 > ❗ **NOTE**
-> If you're on firefox, this may not display properly as the address bar converts URLs to lowercase by default, ruining our CID. Test on Brave or Chrome.
+> Notice how the `image` property has _its own_ IPFS hash! This is storing what the NFT looks like!
 
-Alternatively, if you're having trouble viewing your data directly from the IPFS network you can use the IPFS Gateway. When using a gateway, you're not directly requesting the data from the IPFS Network, you're requesting through another server which makes the request on your behalf, so it brings to question centrality and things again, but I digress. You can view the data via the Gateway with this syntax:
+When this course was originally filmed, the Pudgy Penguins collection had been using IPFS's Gateway to access their images within the TokenURI
 
 ```sh
-https://ipfs.io/ipfs/%3CCID%3E
+"https://ipfs.io/ipfs/QmNf1UsmdGaMbpatQ6toXSkzDpizaGmC9zfunCyoz1enD5/penguin/420.png";
+```
+
+This works, and is often leveraged due to browser compatibily with IPFS, but it's worth noting that this is pointing to a centralized server. If that server goes down, the image data will be unretrievable via the tokenURI call!
+
+A more decentralized way to retrieve the image data is by pointing to the IPFS netwok itself.
+
+```sh
+"ipfs://QmNf1UsmdGaMbpatQ6toXSkzDpizaGmC9zfunCyoz1enD5/penguin/420.png";
+```
+
+### Doggies
+
+With a better understanding of IPFS and decentralized storage in hand, let get back to our BasicNFT contract. If you want, you can take and image I've provided (or your own) and upload it to IPFS to acquire your own hash. Alternatively, if you want to make things easy on yourself:
+
+```sh
+"ipfs://bafybeig37ioir76s7mg5oobetncojcm3c3hxasyd4rvid4jqhy4gkaheg4/?filename=0-PUG.json";
+```
+
+If you view this in your browser or through the IPFS Desktop App, you should see the tokenURI of our Doggie NFT, it's even got an image assigned already.
+
+> ❗ **PROTIP**
+> If you do decide to upload your own data to IPFS, you'll need to upload your image first to acquire an imageURI/hash. You'll then upload a tokenURI json containing this pointer to your image.
+
+```json
+{
+  "name": "PUG",
+  "description": "An adorable PUG pup!",
+  "image": "https://ipfs.io/ipfs/QmSsYRx3LpDAb1GZQm7zZ1AuHZjfbPkD6J7s9r41xu1mf8?filename=pug.png",
+  "attributes": [
+    {
+      "trait_type": "cuteness",
+      "value": 100
+    }
+  ]
+}
+```
+
+Now, we could just paste the about tokenURI as a return value of our tokenUri function, but this would mint every Doggie identical to eachother. Let's spice things up a little bit and allow the user to choose what their NFT looks like. We'll do this by allowing the user to pass a tokenUri to the mint function and mapping this URI to their minted tokenId.
+
+```solidity
+contract BasicNFT is ERC721 {
+  uint256 private s_tokenCounter;
+  mapping(uint256 => string) private s_tokenIdToUri;
+
+  constructor() ERC721("BasicNFT", "BFT") {
+    s_tokenCounter = 0;
+  }
+
+  function mintNFT(string memory tokenUri) public returns (uint256) {
+    s_tokenIdToUri[s_tokenCounter] = tokenUri;
+  }
+
+  function tokenURI(
+    uint256 tokenId
+  ) public view override returns (string memory) {
+    return s_tokenIdToUri[tokenId];
+  }
+}
+```
+
+Great! All that's missing is to mint the NFT and increment our token counter. We can mint the token by calling the inherited \_safeMint function.
+
+```solidity
+contract BasicNFT is ERC721 {
+  uint256 private s_tokenCounter;
+  mapping(uint256 => string) private s_tokenIdToUri;
+
+  constructor() ERC721("BasicNFT", "BFT") {
+    s_tokenCounter = 0;
+  }
+
+  function mintNFT(string memory tokenUri) public returns (uint256) {
+    s_tokenIdToUri[s_tokenCounter] = tokenUri;
+    _safeMint(msg.sender, s_tokenCounter);
+    s_tokenCounter++;
+  }
+
+  function tokenURI(
+    uint256 tokenId
+  ) public view override returns (string memory) {
+    return s_tokenIdToUri[tokenId];
+  }
+}
 ```
 
 ### Wrap Up
 
-Decentralized storage solutions can certainly be confusing, but hopefully with the guidance here and a little practice uploading and sharing you data through a service like IPFS will become easier in time. Often the hardest part of this process is a product of browser compatibilities with IPFS, so if things don't work immediately for you, don't worry.
+Wow, our "BasicNFT" contract looks awesome! It's actually even a little more advanced than you'd think because it allows a user to mint an NFT that looks like .. anything they want!
 
-In the next lesson we'll bring home our understanding of IPFS and how we'll be using it with respect to our Doggie NFT project.
+I challenge you to try deploying this to a testnet and experimenting with minting your own NFTs. Become familiar with hashing your data in IPFS and have fun with customizing your NFT properties.
 
-See you there!
+When you're done, or if you're having trouble, I'll see you in the next lesson to discuss deploying!
