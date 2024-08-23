@@ -1,47 +1,24 @@
-# Deploy your ERC20 crypto currency
+# Introduction to NFTs
 
-Now, by running `make anvil` (open a new terminal once your chain has started!) followed by `make deploy`...
+## NFTs
 
-## Wrap Up
+Welcome back! In this section of the course we'll be investigate Non-fungible Tokens (NFTs), we'll learn what an NFT is, why they're so cool and how to create our very own NFTs, one basic and one advanced.
 
-Woo! Deployment to our anvil chain successful, let's go!
+> ❗ **PROTIP**
+> All the code discussed in this section is available in the associated **[GitHub Repo](https://github.com/Cyfrin/foundry-nft-f23)**.
 
-In the next lesson we'll test our contracts with the help of some AI tools and recap everything we've gone over so far. See you there!
+### Two Flavors
 
-## Test your ERC20 using AI
+As mentioned, we'll be learning two approaches to simple NFT development in this course. This first will be a basic implementation using these cute puppies!
 
-```solidity
-function testTransfer() public {
-  uint256 amount = 1000 * 10 ** 18; // Example amount
-  vm.prank(msg.sender);
-  ourToken.transfer(user1, amount);
+In this first basic implementation our images are going to be stored in **[IPFS](https://ipfs.tech/)**.
 
-  assertEq(ourToken.balanceOf(user1), amount);
-  assertEq(ourToken.balanceOf(msg.sender), deployer.INITIAL_SUPPLY() - amount);
-}
+With our second NFT, the art is going to be stored _on-chain_ and dynamic, changing based on a criteria we set, setting our mood from happy to sad or vice versa!
 
-function testTransferFrom() public {
-  uint256 amount = 500 * 10 ** 18; // Example amount
-  vm.prank(msg.sender);
-  ourToken.approve(user1, amount);
+And, perhaps most excitingly, by the end of this section you'll have you're very own NFTs imported into your own wallet/metamask. You can also view them on service like OpenSea which will allow you to sell, trade, view and collect all sorts of NFTs!
 
-  vm.prank(user1);
-  ourToken.transferFrom(msg.sender, user2, amount);
+### Wrap Up
 
-  assertEq(ourToken.balanceOf(user2), amount);
-  assertEq(ourToken.allowance(msg.sender, user1), 0);
-}
+This is probably one of the most exciting sections for many people. NFTs are an exciting technology and an inspiring form of artistic expression.
 
-function testFailTransferExceedsBalance() public {
-  uint256 amount = deployer.INITIAL_SUPPLY() + 1;
-  vm.prank(msg.sender);
-  ourToken.transfer(user1, amount); // This should fail
-}
-
-function testFailApproveExceedsBalance() public {
-  uint256 amount = deployer.INITIAL_SUPPLY() + 1;
-  vm.expectRevert();
-  vm.prank(msg.sender);
-  ourToken.approve(user1, amount); // This should fail
-}
-```
+Let's not waste any more time and start from the beginning. In the next lesson - **What is an NFT?**
