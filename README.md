@@ -1,65 +1,86 @@
-# Interact with a smart contract
+# Deploy your NFTs on the testnet
 
-## Basic NFT Interactions
-
-Alright, with our tests passing we're going to want a way to interact with our contract programmatically. We could use `cast` commands, but let's write an interactions script instead. Create the file `script/Interactions.s.sol`. You know the drill for our boilerplate by now.
-
-```solidity
-// SPDX-License-Identifier: MIT
-
-pragma solidity ^0.8.18;
-
-import { Script } from "forge-std/Script.sol";
-
-contract MintBasicNft is Script {
-  function run() external {}
-}
-```
-
-We know we'll always want to be interacting with the latest deployment, so let's install the `foundry-devops` library to help with this.
-
-```bash
-forge install Cyfrin/foundry-devops --no-commit
-```
-
-Now, we can import `DevOpsTools` and use this to acquire our most recent deployment. We'll use this address as a parameter for the `mint` function we'll call.
-
-> ❗ **NOTE**
-> I've copied over my `PUG tokenUri` for use in our `mint` function, remember to copy your own over too!
-
-```solidity
-// SPDX-License-Identifier: MIT
-
-pragme solidity ^0.8.18;
-
-import {Script} from "forge-std/Script.sol";
-import {BasicNft} from "../src/BasicNft.sol";
-import {DevOpsTools} from "lib/foundry-devops/src/DevOpsTools.sol";
-
-contract MintBasicNft is Script{
-
-    string public constant TOKENURI =
-        "ipfs://bafybeig37ioir76s7mg5oobetncojcm3c3hxasyd4rvid4jqhy4gkaheg4/?filename=0-PUG.json";
-
-    function run() external {
-        address mostRecentlyDeployed = DevOpsTools.get_most_recent_deployment("BasicNft", block.chainid);
-
-        mintNftOnContract(mostRecentlyDeployed);
-    }
-
-    function mintNftOnContract(address contractAddress) public {
-        vm.startBroadcast();
-        BasicNft(contractAddress).mintNft(TOKENURI)
-        vm.stopBroadcast();
-    }
-}
-```
+Assuming our `.env` is ready to go, we should be able to run the following...
 
 > ❗ **PROTIP**
-> Remember, if you don't recall which parameters are required for a function like `get_most_recent_deployment` you can `ctrl + left-click` (`cmd + click`) to be brought to the function definition.
+> Remember to add the required environment variables if necessary. You should need a `sepolia RPC-URL`, an `account private key` and an `etherscan api key`.
 
-### Wrap Up
+```bash
+make deploy ARGS="--netwok sepolia"
+```
 
-That's all there is to our interactions script, albeit we're only interacting with a single function, great work nonetheless!
+After a brief wait...
 
-In the next lesson we'll look at deploying our contract to a testnet and using our script to test interacting with it on-chain.
+All deployed!
+
+With a contract deployed, this transaction data, including the contract address is added to our `broadcast` folder within run-latest.json. This is how our `DevOpsTool` acquires the most recent contract deployment. We should now be able to use our `Interactions.s.sol` script to mint ourselves an NFT.
+
+> ❗ **IMPORTANT**
+> Add `fs_permissions = [{ access = "read", path = "./broadcast" }]` to your `foundry.toml` or DevOpsTools won't have the permissions necessary to function correctly! This is more safe than `FFI=true`.
+
+```bash
+make mint ARGS="--network sepolia"
+```
+
+While this is minting, we can navigate to our Metamask wallet and import our NFT Token. Grab the address of the contract we deployed from Etherscan (or `broadcast/DeployBasicNft.s.sol/11155111/run-latest.json`).
+
+Enter the contract address and a tokenId of `0` when prompted. Then, after a brief wait...
+
+We can see our NFT in our wallet!!!
+
+## Wrap Up
+
+Amazing work! We've deployed an NFT protocol to a testnet, we've minted ourselves an NFT programmatically, and we've imported that Token right into our wallet. Our adorable Pup is our to do with as we please!
+
+We've learnt so much already and you should be very proud, but it's not time to stop yet. In the next lesson we'll discuss the pros and cons of data storage and the services and methodologies available to us.
+
+Let's gooo!
+
+While testing is a vital part of NFT creation, deploying it in a real use case can bring more clarity to your understanding. Luckily, there are several ways to deploy your NFT. You could consider using Anvil, your own Anvil server, or a testnet. If you're not keen on waiting for the testnet or spending the gas, I'd recommend deploying it to Anvil.
+
+The processes detailed below are optional, but feel free to follow along if you'd like.
+
+### Using a Makefile for Quick Deployment
+
+Rather than typing out long scripts, we'll use a makefile here. The associated Git repo contains the makefile we're using, allowing you to simply copy and paste rather than rewriting everything.
+
+In the makefile, we've captured most of the topics we've discussed so far, including our deploy script, which we'll use to deploy our basic NFT.
+
+Here is what the deploy script looks like:
+
+```bash
+deploy:@forge script script/DeployBasicNft.s.sol:DeployBasicNft $(NETWORK_ARGS)
+```
+
+It's important here to ensure you have included your environmental variables.
+
+It's noteworthy that you should write some tests before deploying on a testnet, although for the sake of showing you what the NFT looks like, we'll skip this step in this instance.
+
+## Deploying Our Basic NFT
+
+We're now going to deploy our basic NFT to the contract address. After successful deployment, there will be a short wait for its verification.
+
+### Extracting Contract Info and Minting
+
+With our NFT deployed, we'll now move to extract our contract data. In the broadcast folder, the latest run contains the created basic NFT information. We'll execute the following command to initiate the Mint function:
+
+```bash
+mint:    @forge script script/Interactions.s.sol:Interactions $(NETWORK_ARGS)
+```
+
+The DevOps tool works by grabbing the most recent contract from this folder, thus automating the process.
+
+## Importing NFT into MetaMask
+
+While the NFT is being minted, let's transition to MetaMask:
+
+1. Copy the contract address under which the NFT was deployed.
+2. From MetaMask, go to NFTs and switch to Sepolia.
+3. Click on Import NFTs and paste the copied address.
+4. Since we're the first to create this NFT, the token ID will be zero. Input this and hit 'Add'.
+
+After a short wait, your NFT will be viewable right from your MetaMask wallet. It's intelligent enough to extract the token URI, allowing you to view the image, contract address, or send it elsewhere.
+
+Congratulations! You've successfully deployed and imported an NFT into MetaMask. You can now interact with it just as you would in a marketplace like OpenSea. Through this process, you've learned how to make an NFT come to life, from being just a script to being part of the real-world, bridging the gap between test environments and real applications.
+
+Stay tuned for our next post on advanced NFT creation steps, such as a complete DeFi app development and more.
