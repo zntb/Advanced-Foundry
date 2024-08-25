@@ -1,86 +1,40 @@
-# Deploy your NFTs on the testnet
+# IPFS and Pinata vs HTTP vs on chain SVGs
 
-Assuming our `.env` is ready to go, we should be able to run the following...
+## The issue with IPFS vs HTTPS
+
+In this lesson we'll discuss two ways we can reference our data in `IPFS` and ways we can strengthen the hosting of it to ensure it's always made available.
+
+First things first: Let's discuss the **InterPlanetary File System (IPFS)** and the pros and cons associated with it.
+
+### IPFS
+
+We learnt previously that there are two ways to reference the location of data hosted by `IPFS`. We can point directly to the `IPFS` network with the syntax `ipfs://<CID>` _or_ we can use the `IPFS Gateway` and point to an IPFS server via `https://ipfs.io/ipfs/<CID>`.
+
+There are some important considerations to keep in mind here. If we decide to use the `IPFS Gateway`, this is essentially pointing to a website hosted on a server by `IPFS`. If this website or server goes down for any reason the data we're pointing to will be unretrievable!
+
+Imagine losing the art of your NFT forever!
+
+A safer methodology is pointing to the `IPFS` network directly, but this comes with caveats. While the URI is pointing to a decentralized network, assuring the data is accessible so long as a node is still hosting it, most browsers and services don't natively support interfacing with the `IPFS` network. This can make viewing and interacting with your NFT cumbersome.
+
+In addition to the above, the `IPFS` network doesn't automatically distribute all data amongst all nodes on the network (like a blockchain would). Instead it relies on nodes pinning the data they find valuable to assure it's available to the rest of the network. If I'm the only person pinning my data on `IPFS`, I'm not any more decentralized than using the `IPFS Gateway`.
+
+_**So, how do we solve this?**_
+
+### Pinning Services
+
+Fortunately, there are services available which developers can use to pin their data for them, decentralizing access to it. One such service is **[Pinata.cloud](https://www.pinata.cloud/)**.
+
+Once an account is created and you've logged in, the UI functions much like an `IPFS` node and you can simply upload any files you want the service to pin on your behalf.
+
+Once uploaded, `Pinata` will provide a `CID`, just like `IPFS` itself will.
 
 > ❗ **PROTIP**
-> Remember to add the required environment variables if necessary. You should need a `sepolia RPC-URL`, an `account private key` and an `etherscan api key`.
+> Whenever I work on a project, I will upload my images/data both to my local `IPFS` node as well as `Pinata` to assure the data is always pinned _somewhere_.
 
-```bash
-make deploy ARGS="--netwok sepolia"
-```
+### Wrap Up
 
-After a brief wait...
+So, in summary, pointing to the `IPFS Gateway`, not great. Pointing to the `IPFS` network itself is a little better and more decentralized, but comes with it's own issues. What if I told you there's an even better way to store our images?
 
-All deployed!
+In the next lesson we'll discuss `Scalable Vector Graphics`, or `SVGs` and how images of this type can be stored _on-chain_ making them permanently accessible!
 
-With a contract deployed, this transaction data, including the contract address is added to our `broadcast` folder within run-latest.json. This is how our `DevOpsTool` acquires the most recent contract deployment. We should now be able to use our `Interactions.s.sol` script to mint ourselves an NFT.
-
-> ❗ **IMPORTANT**
-> Add `fs_permissions = [{ access = "read", path = "./broadcast" }]` to your `foundry.toml` or DevOpsTools won't have the permissions necessary to function correctly! This is more safe than `FFI=true`.
-
-```bash
-make mint ARGS="--network sepolia"
-```
-
-While this is minting, we can navigate to our Metamask wallet and import our NFT Token. Grab the address of the contract we deployed from Etherscan (or `broadcast/DeployBasicNft.s.sol/11155111/run-latest.json`).
-
-Enter the contract address and a tokenId of `0` when prompted. Then, after a brief wait...
-
-We can see our NFT in our wallet!!!
-
-## Wrap Up
-
-Amazing work! We've deployed an NFT protocol to a testnet, we've minted ourselves an NFT programmatically, and we've imported that Token right into our wallet. Our adorable Pup is our to do with as we please!
-
-We've learnt so much already and you should be very proud, but it's not time to stop yet. In the next lesson we'll discuss the pros and cons of data storage and the services and methodologies available to us.
-
-Let's gooo!
-
-While testing is a vital part of NFT creation, deploying it in a real use case can bring more clarity to your understanding. Luckily, there are several ways to deploy your NFT. You could consider using Anvil, your own Anvil server, or a testnet. If you're not keen on waiting for the testnet or spending the gas, I'd recommend deploying it to Anvil.
-
-The processes detailed below are optional, but feel free to follow along if you'd like.
-
-### Using a Makefile for Quick Deployment
-
-Rather than typing out long scripts, we'll use a makefile here. The associated Git repo contains the makefile we're using, allowing you to simply copy and paste rather than rewriting everything.
-
-In the makefile, we've captured most of the topics we've discussed so far, including our deploy script, which we'll use to deploy our basic NFT.
-
-Here is what the deploy script looks like:
-
-```bash
-deploy:@forge script script/DeployBasicNft.s.sol:DeployBasicNft $(NETWORK_ARGS)
-```
-
-It's important here to ensure you have included your environmental variables.
-
-It's noteworthy that you should write some tests before deploying on a testnet, although for the sake of showing you what the NFT looks like, we'll skip this step in this instance.
-
-## Deploying Our Basic NFT
-
-We're now going to deploy our basic NFT to the contract address. After successful deployment, there will be a short wait for its verification.
-
-### Extracting Contract Info and Minting
-
-With our NFT deployed, we'll now move to extract our contract data. In the broadcast folder, the latest run contains the created basic NFT information. We'll execute the following command to initiate the Mint function:
-
-```bash
-mint:    @forge script script/Interactions.s.sol:Interactions $(NETWORK_ARGS)
-```
-
-The DevOps tool works by grabbing the most recent contract from this folder, thus automating the process.
-
-## Importing NFT into MetaMask
-
-While the NFT is being minted, let's transition to MetaMask:
-
-1. Copy the contract address under which the NFT was deployed.
-2. From MetaMask, go to NFTs and switch to Sepolia.
-3. Click on Import NFTs and paste the copied address.
-4. Since we're the first to create this NFT, the token ID will be zero. Input this and hit 'Add'.
-
-After a short wait, your NFT will be viewable right from your MetaMask wallet. It's intelligent enough to extract the token URI, allowing you to view the image, contract address, or send it elsewhere.
-
-Congratulations! You've successfully deployed and imported an NFT into MetaMask. You can now interact with it just as you would in a marketplace like OpenSea. Through this process, you've learned how to make an NFT come to life, from being just a script to being part of the real-world, bridging the gap between test environments and real applications.
-
-Stay tuned for our next post on advanced NFT creation steps, such as a complete DeFi app development and more.
+See you there!
