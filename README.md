@@ -1,128 +1,78 @@
-# What is an SVG?
+# Create a dynamic NFTs collection
 
-To understand what an `SVG` is, we'll dive right into a helpful tutorial from our friends at [W3Schools](https://www.w3schools.com/graphics/svg_intro.asp). SVG stands for `Scalable Vector Graphics`. In 'simple' terms, SVG is a way to define images in a two-dimensional space using XML coded tags with specific parameters.
+## SVG NFT
 
-**SVG Example:**
+Ok, we've gained lots of context and understand about data storage in general and the benefits of `SVGs` specifically. Let's begin creating our very own dynamic `MoodNFT` with its `SVG` art stored on-chain.
 
-```xml
-<html>
-  <body>
-    <h1>My first SVG</h1>
+At the core of the NFT we'll build is a `flipMood` function which allows the owner to flip their NFT between happy and sad images.
 
-    <svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
-      <circle
-        cx="50"
-        cy="50"
-        r="40"
-        stroke="green"
-        stroke-width="4"
-        fill="yellow"
-      />
-    </svg>
-  </body>
-</html>
+Start with creating the file `src/MoodNft.sol` and filling out the usual boilerplate. We're definitely getting good at this by now.
+
+```solidity
+// SPDX-License-Identifier: MIT
+
+pragma solidity ^0.8.18;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+
+contract MoodNft is ERC721 {
+  constructor() ERC721("Mood NFT", "MN") {}
+}
 ```
 
-SVGs are awesome because they maintain their quality, no matter what size you make them. If you stretch a traditional image file like a .jpg or .png, they become pixelated and lose clarity. SVGs don’t suffer from this issue because they’re scalable. They’re defined within an exact parameter, thus maintaining their quality regardless of scale.
+Looking good! We want to store the `SVG` art on chain, we we're actually going to pass these to our `constructor` on deployment.
 
-I encourage you to play with editing the parameters in the **[W3Schools SVG Demo](https://www.w3schools.com/graphics/tryit.asp?filename=trysvg_myfirst)**. Experiment with how the different parameters can change your image! There's lots of documentation on that website detailing all the tags and features one could add to an SVG.
-
-## Creating Your Own SVG
-
-Let's look at how we can create our own simple SVG, right in our IDE. Create the file `img/example.svg`. We can use the `<svg>` tag to define what our simple image will look like.
-
-```xml
-<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500">
-  <text x="200" y="250" fill="white">
-    Hi! You decoded this!{" "}
-  </text>
-</svg>
+```solidity
+constructor(
+  string memory sadSvg,
+  string memory happySvg
+) ERC721("Mood NFT", "MN") {}
 ```
 
-> ❗ **IMPORTANT**
-> You will likely need to download a SVG preview extention to view the SVG in your IDE. I recommend trying **[SVG Preview](https://marketplace.visualstudio.com/items?itemName=SimonSiefke.svg-preview)**.
+We know we'll need a `tokenCounter`, along with this let's declare our `sadSvg` and `happySvg` as storage variables as well. All together, before getting into our functions, things should look like this:
 
-Importantly, this SVG code _**is not**_ a URI, but we can convert this into a URI that a browser can understand by passing all the necessary data through the URL of our browser.
+```solidity
+// SPDX-License-Identifier: MIT
 
-### Converting to a URI
+pragma solidity ^0.8.18;
 
-In your terminal, enter the command `base64 --help` to determine if you have base64 installed, this isn't compatible with all computers, so if you don't have it available, you can copy the encoding I've provided below.
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
-For those with base64 installed, first switch to your `img` directory.
+contract MoodNft is ERC721 {
+  string private s_sadSvg;
+  string private s_happySvg;
+  uint256 private s_tokenCounter;
 
-```bash
-cd img
+  constructor(
+    string memory sadSvg,
+    string memory happySvg
+  ) ERC721("Mood NFT", "MN") {
+    s_tokenCounter = 0;
+    s_sadSvg = sadSvg;
+    s_happySvg = happySvg;
+  }
+}
 ```
 
-Then run the following command to pass our example.svg as a file to the base64 command:
+Now we need a `mint` function, anyone should be able to call it, so it should definitely be `public`. This shouldn't be anything especially new to us so far.
 
-```bash
-base64 -i example.svg
+```solidity
+function mintNft() public {
+  _safeMint(msg.sender, s_tokenCounter);
+  s_tokenCounter++;
+}
 ```
 
-You should get an output like this (those without base64 can copy and paste this value):
+And now the moment of truth! As we write the `tokenURI` function, we know this is what defines what our NFT looks like and the metadata associated with it. Remember that we'll need to `override` this `virtual` function of the `ERC721` standard.
 
-```bash
-PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIj4KPHRleHQgeD0iMjAwIiB5PSIyNTAiIGZpbGw9IndoaXRlIj5IaSEgWW91IGRlY29kZWQgdGhpcyEgPC90ZXh0Pgo8L3N2Zz4=
+```solidity
+function tokenURI(
+  uint256 tokenId
+) public view override returns (string memory) {}
 ```
-
-This weird output is the base64 encoded example.svg. We can now add a prefix which tells our browser what type of data this is, `data:image/svg+xml,base64,`.
-
-Copy this whole string into your browser and you should see our SVG!
-
-```bash
-data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIj4KPHRleHQgeD0iMjAwIiB5PSIyNTAiIGZpbGw9IndoaXRlIj5IaSEgWW91IGRlY29kZWQgdGhpcyEgPC90ZXh0Pgo8L3N2Zz4=
-```
-
-This same process can be applied to our SVG images for our NFTs. You can navigate to the **[GitHub Repo](https://github.com/Cyfrin/foundry-nft-f23/blob/main/images/dynamicNft/happy.svg?short_path=224d82e)** to see the code which represents our happy and sad SVGs.
-
-**Happy.svg**
-
-```xml
-<svg
-  viewBox="0 0 200 200"
-  width="400"
-  height="400"
-  xmlns="http://www.w3.org/2000/svg"
->
-  <circle
-    cx="100"
-    cy="100"
-    fill="yellow"
-    r="78"
-    stroke="black"
-    stroke-width="3"
-  />
-  <g class="eyes">
-    <circle cx="61" cy="82" r="12" />
-    <circle cx="127" cy="82" r="12" />
-  </g>
-  <path
-    d="m136.81 116.53c.69 26.17-64.11 42-81.52-.73"
-    style="fill:none; stroke: black; stroke-width: 3;"
-  />
-</svg>
-```
-
-> ❗ **PROTIP**
-> If you don't have happy.svg and sad.svg images within your img folder, now would be a great time to create them! Copy the SVG code from the **[GitHub Repo](https://github.com/Cyfrin/foundry-nft-f23/tree/main/images/dynamicNft)**!
-
-Once we have both of these images in our workspace, we can run our base64 commands to encode them (those without base64, feel free to grab the encodings below):
-
-```bash
-base64 -i happy.svg
-PHN2ZyB2aWV3Qm94PSIwIDAgMjAwIDIwMCIgd2lkdGg9IjQwMCIgIGhlaWdodD0iNDAwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxjaXJjbGUgY3g9IjEwMCIgY3k9IjEwMCIgZmlsbD0ieWVsbG93IiByPSI3OCIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIzIi8CiAgPGcgY2xhc3M9ImV5ZXMiPgogICAgPGNpcmNsZSBjeD0iNjEiIGN5PSI4MiIgcj0iMTIiLz4KICAgIDxjaXJjbGUgY3g9IjEyNyIgY3k9IjgyIiByPSIxMiIvPgogIDwvZz4KICA8cGF0aCBkPSJtMTM2LjgxIDExNi41M2MuNjkgMjYuMTctNjQuMTEgNDItODEuNTItLjczIiBzdHlsZT0iZmlsbDpub25lOyBzdHJva2U6IGJsYWNrOyBzdHJva2Utd2lkdGg6IDM7Ii8+Cjwvc3ZnPg==
-
-base64 -i sad.svg
-PHN2ZyB3aWR0aD0iMTAyNHB4IiBoZWlnaHQ9IjEwMjRweCIgdmlld0JveD0iMCAwIDEwMjQgMTAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBmaWxsPSIjMzMzIiBkPSJNNTEyIDY0QzI2NC42IDY0IDY0IDI2NC42IDY0IDUxMnMyMDAuNiA0NDggNDQ4IDQ0OCA0NDgtMjAwLjYgNDQ4LTQ0OFM3NTkuNCA2NCA1MTIgNjR6bTAgODIwYy0yMDUuNCAwLTM3Mi0xNjYuNi0zNzItMzcyczE2Ni42LTM3MiAzNzItMzcyIDM3MiAxNjYuNiAzNzIgMzcyLTE2Ni42IDM3Mi0zNzIgMzcyeiIvPgogIDxwYXRoIGZpbGw9IiNFNkU2RTYiIGQ9Ik01MTIgMTQwYy0yMDUuNCAwLTM3MiAxNjYuNi0zNzIgMzcyczE2Ni42IDM3MiAzNzIgMzcyIDM3Mi0xNjYuNiAzNzItMzcyLTE2Ni42LTM3Mi0zNzItMzcyek0yODggNDIxYTQ4LjAxIDQ4LjAxIDAgMCAxIDk2IDAgNDguMDEgNDguMDEgMCAwIDEtOTYgMHptMzc2IDI3MmgtNDguMWMtNC4yIDAtNy44LTMuMi04LjEtNy40QzYwNCA2MzYuMSA1NjIuNSA1OTcgNTEyIDU5N3MtOTIuMSAzOS4xLTk1LjggODguNmMtLjMgNC4yLTMuOSA3LjQtOC4xIDcuNEgzNjBhOCA4IDAgMCAxLTgtOC40YzQuNC04NC4zIDc0LjUtMTUxLjYgMTYwLTE1MS42czE1NS42IDY3LjMgMTYwIDE1MS42YTggOCAwIDAgMS04IDguNHptMjQtMjI0YTQ4LjAxIDQ4LjAxIDAgMCAxIDAtOTYgNDguMDEgNDguMDEgMCAwIDEgMCA5NnoiLz4KICA8cGF0aCBmaWxsPSIjMzMzIiBkPSJNMjg4IDQyMWE0OCA0OCAwIDEgMCA5NiAwIDQ4IDQ4IDAgMSAwLTk2IDB6bTIyNCAxMTJjLTg1LjUgMC0xNTUuNiA2Ny4zLTE2MCAxNTEuNmE4IDggMCAwIDAgOCA4LjRoNDguMWM0LjIgMCA3LjgtMy4yIDguMS03LjQgMy43LTQ5LjUgNDUuMy04OC42IDk1LjgtODguNnM5MiAzOS4xIDk1LjggODguNmMuMyA0LjIgMy45IDcuNCA4LjEgNy40SDY2NGE4IDggMCAwIDAgOC04LjRDNjY3LjYgNjAwLjMgNTk3LjUgNTMzIDUxMiA1MzN6bTEyOC0xMTJhNDggNDggMCAxIDAgOTYgMCA0OCA0OCAwIDEgMC05NiAweiIvPgo8L3N2Zz4=
-```
-
-Append our prefix `data:image/svg+xml;base64,` and view the images in your browser to assure things are working as expected!
 
 ### Wrap Up
 
-This is more like what we'd expect to see in a TokenURI, and it's small enough that we can reasonable store this data directly on-chain! As an additional bonus to storing this data on chain and SVGs basically being code is ... we can interact with this data and change it programmatically! It just keep getting cooler.
+Our on-chain, dynamic, `SVG NFT` is slowly coming to life! In the next lesson let's walk through the contents of our `tokenURI` function and how we can encode our `SVGs` in a way such that they can be reasonably stored on the blockchain.
 
-In the next lesson we'll go over creating an NFT, leveraging on-chain data allowing it to be _dynamic_.
-
-Let's go!
+See you there!
