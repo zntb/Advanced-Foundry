@@ -1,41 +1,40 @@
-# Modify the NFT image onchain
+# Create the deployment script
 
-## SVG NFT Flipping the Mood
+With these adjustments, our tests should function identically to before.
 
-With the assurance that our tokenURI function is returning a correctly formatting string, for both our tokenURI itself _and_ our imageURI, I think we're ready to make this NFT dynamic!
+## Testing Flipping the URI
 
-Because our SVGs are on-chain, this affords us the ability to easily swap between them by calling a function. Let's write that function now.
-
-Our first consideration should be that _only the owner_ of an NFT should be able to flip its mood. We can use the \_isApprovedOrOwner function, included within the ERC721 standard to verify this before our flipMood function execution.
+One thing we definitely haven't tested yet, and we should do quickly, is our flipMood function. Lets assure this properly swaps between happy and sad when called.
 
 ```solidity
-function flipMood(uint256 tokenId) public {
-  if (!_isApprovedOrOwner(msg.sender, tokenId)) {
-    revert MoodNFT__CantFlipMoodIfNotOwner();
-  }
+function testFlipMoodIntegration() public {
+  vm.prank(USER);
+  moodNFT.mintNft();
+  vm.prank(USER);
+  moodNFT.flipMood(0);
+  assert(
+    keccak256(abi.encodePacked(moodNft.tokenURI(0))) ==
+      keccak256(abi.encodePacked(SAD_SVG_URI))
+  );
 }
 ```
 
-Remember to create our new custom error at the start of the contract! `error MoodNFT__CantFlipMoodIfNotOwner();`.
+This test has our USER mint an NFT (which defaults as happy), and then flips the mood to sad with the flipMood function. We then assert that the token's URI matches what's expected.
 
-From here, we'll just check if it NFT is happy, and if so, make it sad, otherwise we'll make it happy. This will flip the NFT's mood regardless of it's current mood.
+Let's run it!
 
-```solidity
-function flipMood(uint256 tokenId) public {
-  if (!_isApprovedOrOwner(msg.sender, tokenId)) {
-    revert MoodNFT__CantFlipMoodIfNotOwner();
-  }
-
-  if (s_tokenIdToMood[tokenId] == Mood.HAPPY) {
-    s_tokenIdToMood[tokenId] == Mood.SAD;
-  } else {
-    s_tokenIdToMood[tokenId] == Mood.HAPPY;
-  }
-}
+```shell
+forge test --mt testFlipMoodIntegration
 ```
+
+Uh oh. That ain't right.
 
 ### Wrap Up
 
-This was easy enough, we've now got a function which an owner can use to flip the mood of their NFT. Wonderful!
+Wow, this was a big lesson. We've written a deploy script and refactored some of our tests into more secure integration style tests.
 
-In the next lesson we'll walkthrough the creation of our deployment script!
+For some reason `testFlipMoodIntegration` is erroring on us though...
+
+In the next lesson we'll get some practice debugging, I suppose!
+
+See you there!
