@@ -1,55 +1,39 @@
-# Deploy and interact using Anvil
+# Introduction to Filecoin and Arweave
 
-## SVG NFT Anvil Demo
+## Filecoin & Arweave
 
-Alright, let's do this for real. I wanna see our token in our Metamask wallet!
+On-chain storage can be gas intensive, sometimes prohibitively so. I wanted to make you aware of additional options you could consider for decentralized storage in your projects. Two of the most popular options out there are `Filecoin` and `Arweave`.
 
-> ❗ **NOTE**
-> I recommend following along on `anvil` instead of sepolia, testnets can be slow and problematic, everything we're doing should work locally.
+I've got a great video detailing Filecoin and decentralized storage available **[here](https://www.youtube.com/watch?v=Cj9r3pKI2L8)**. I highly recommend you give it watch.
 
-We can start by kicking off our anvil chain. This has already been configured in our `Makefile`, so we should just have to run `make anvil`
+1. **Arweave**
 
-Once the chain is running, open a new terminal (while leaving this one open). We'll have to add some commands to our `Makefile` before proceeding.
+Arweave is a decentralized storage network that makes data immune to modification, ensuring data validity over very long periods. This is an ideal solution for anyone looking for a permanent database.
 
-```bash
-deploymood:@forge script script/DeployMoodNft.s.sol:DeployMoodNft $(NETWORK_ARGS)
-```
+1. **Filecoin**
 
-Looks great! Remember, you can add anvil as at network to Metamask by navigating to your network selector and choosing `+ Add network`.
+Providing reliable and cost-effective storage, Filecoin is a decentralized protocol that propels the open-market for data storage services.
 
-Choose to add a network manually and enter the details as shown below:
+### Alison from FileCoin
 
-If you need to import an anvil account, this is simple as well. When an anvil chain is spun up, it provides you with public and private keys for a number of default accounts. In your Metamask account selector, choose `+ add account or hardware wallet`
+Alison Haire brings us her expert take from the Filecoin Foundation, providing a deep dive into the motivations and functionalities of the Filecoin ecosystem.
 
-Select `import account` and enter one of the default private keys offered by the anvil chain.
+### Filecoin
 
-Once everything is set up, we should be able to run `make deployMood`...
+Filecoin, since its launch in 2020, has been working tirelessly towards decentralizing the data infrastructure for the internet. Their layer one solution, Filecoin Virtual Machine (FVM), has launched some impressive functionalities.
 
-With the contract address, we should be able to use a cast command to interact with it.
+- **Filecoin Data Deal Making:** It involves setting up an agreement between a client and a miner to store data.
+- **Tokenization of Data Sets:** With tokenization, data can be protected securely and transparently.
+- **Data DAOs:** Filecoin's on-chain tools allow data to be collectively owned and governed by an organization (DAO - Decentralized Autonomous Organization).
 
-```bash
-cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3 "mintNft()" --private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --rpc-url http://localhost:8545
+And many more use cases are being developed, showcased in the [Filecoin docs](https://docs.filecoin.io/).
 
-```
-
-When that transaction completes, what we can _finally_ do, is take that contract address, go back into `Metamask > NFTs > Import NFT`. This is going to ask for our contract address, which we have from our deployment, and our tokenId, which is 0.
-
-Once imported ...
-
-LETS GOOOO! Now we need to flip it. We should be able to use largely the same `cast` command, let's just adjust the function to `flipMood`
-
-```bash
-cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3 "flipMood(uint256)" 0 --private-key ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --
-rpc-url http://localhost:8545
-```
-
-> ❗ **NOTE**
-> For Metamask to reflect the change, we'll regrettably have to remove and readd the NFT collection.
-
-Once we reimport our NFT however...
+To get started with Filecoin, try deploying a smart contract to FVM, or use the storage helper - **[Web3 Storage](https://web3.storage/)** or **[NFT Storage](https://nft.storage/)**, to engage with the technology directly.
 
 ### Wrap Up
 
-We did it! We've just shown that we can write and deploy our own NFT contract with SVG art 100% on-chain. We could deploy this to a testnet if we wanted to. We could deploy this to a _mainnet_ if we wanted to. First hand we've experienced the power and advantages of keeping our data on-chain and as decentralized as possible.
+With this brief aside complete, we have one major concept I want to add context to in this lesson. Repeatedly we've been using `abi.encode` and `abi.encodePacked` to concatenate strings basically. It's about time we learnt what's actually going on under-the-hood.
 
-We've just done amazing work.
+In the next lesson we're gunna get a little more low-level. I'm sure you're ready for it.
+
+See you soon!
