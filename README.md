@@ -1,37 +1,46 @@
-# Advanced EVM - Encoding
+# Advanced EVM - Recap
 
-We can also accomplish our goals with the `bytecode` version directly. All you _really_ need to send a function call is the name of a function and the input types.
+## Advanced EVM - Encoding Recap
 
-Two questions arise:
+Before looking at how we can apply all our new encoding knowledge to call our own functions, let's recap some of the things we've gone over so far, there's been a lot.
 
-_**How do we send transactions that call functions with just the data field populated?**_
+### Concatenation
 
-_**How do we populate the data field?**_
-
-We're going to answer these by leveraging additional low-level keywords offered by Solidity, `staticcall` and `call`.
-
-We've used call previously... if this code rings a bell:
+At a high-level we learnt that abi.encodePacked can be used to concatenate strings.
 
 ```solidity
-function withdraw(address recentWinner) public {
-  (bool success, ) = recentWinner.call{ value: address(this).balance }("");
-  require(success, "Transfer Failed");
-}
+string memory someString = string(abi.encodePacked("Hi Mom! ", "Miss you!"))
 ```
 
-**call:** How we call functions to change the state of the blockchain
+> ❗ **PROTIP**
+> Remember: In newer versions of Solidity, you can use `string.concat("Hi Mom! ", "Miss you!")`
 
-**staticcall:** How we call view or pure functions
+### Binary and Opcodes
 
-> ❗ **PROTIP** > `send` and `delegatecall` also exist as options for low-level calling to the blockchain, but we'll go over these in greater detail later!
+We learnt that when a contract is compiled, it's actually compiled into an ABI (application binary interface) and a binary or bytecode format.
 
-When we write `recentWinner.call{value: address(this).balance}("");` we're directly updating the value property of the transaction we're sending. The parenthesis at the end of this call are where we provide our transaction data.
+Any transaction we send to the blockchain is ultimately compiled down to this bytecode. For contract creation transactions, the data field of the transaction _is_ this bytecode.
 
-- within `{}` we're able to pass specific fields of a transaction, like `value`
-- within `()` we can pass the data needed to call a specific function.
+Any system capable of reading the operations contained within this bytecode is said to be `EVM Compatible`.
 
-## Wrap Up
+### Encoding
 
-Whew, this is heavy, but it's advanced. The power provided by low-level function calls cannot be overstated.
+We also learnt that we can use the encoding functionality of the EVM to encode basically anything. Basic encoding is accomplished with `abi.encode`, but we've a few options available to us.
 
-Now that we have some understanding of how encoding can be using in sending transactions, let's take a step back in the next lesson to recap what we've gone over
+`abi.encode` will result in a padded return value, however the EVM offers a way to save space/gas by packing our encodings through `abi.encodePacked`.
+
+The EVM also affords us the ability to decode and multi-encode, really giving us flexibility to work with our data.
+
+### Low-level Calls
+
+Lastly we touched on a couple of Solidity's available low-level calls such as `call`, `staticcall`.
+
+The data passed to these functions allows us to make _any_ arbitrary call to an address we want - this is what we'll cover in more detail next.
+
+### Wrap Up
+
+Alright, great work so far. Now's a great time to take a break before we make the final push to the end of this section.
+
+In the next lesson we'll see how these concepts work in practice as we dive into function selector encoding and sending encoded function calls.
+
+Let's go!
