@@ -1,46 +1,17 @@
-# Advanced EVM - Recap
+# EVM signatures selectors
 
-## Advanced EVM - Encoding Recap
+By passing this contract the address of our `CallAnything.sol` deployment. We're able to use the functions it possesses to interact with `CallAnything.sol`
 
-Before looking at how we can apply all our new encoding knowledge to call our own functions, let's recap some of the things we've gone over so far, there's been a lot.
+Before we interact with anything, recall what the values of our storage variables on `CallAnything.sol` are currently.
 
-### Concatenation
+Now we can call `callTransferFunctionDirectlyThree` on our `CallFunctionWithoutContract.sol` by passing a new address and amount. This should result in an updating of the storage variables on CallAnything.sol via this low-level call.
 
-At a high-level we learnt that abi.encodePacked can be used to concatenate strings.
+## Wrap Up
 
-```solidity
-string memory someString = string(abi.encodePacked("Hi Mom! ", "Miss you!"))
-```
+Hopefully by now you can see the power available through this methodology of low-level calls. Now, despite hyping it up for several lessons, low-level calls are risky, and it's worth noting that they should be avoided when possible. Use an interface or something similar if you can, because low-level calls can leave you open to a number of potential issues and vulnerabilities.
 
-> ❗ **PROTIP**
-> Remember: In newer versions of Solidity, you can use `string.concat("Hi Mom! ", "Miss you!")`
+With that said, you've just learnt some really advanced stuff. If it's a little confusing, don't feel bad, you can always come back later when you've gained a little more experience and context of the EVM
 
-### Binary and Opcodes
+If you're excited to learn more about how Solidity works under-the-hood, I recommend reading through the **[Deconstructing Solidity](https://blog.openzeppelin.com/deconstructing-a-solidity-contract-part-i-introduction-832efd2d7737)** series by OpenZeppelin. It does a great job breaking things down in a very digestible and granular way.
 
-We learnt that when a contract is compiled, it's actually compiled into an ABI (application binary interface) and a binary or bytecode format.
-
-Any transaction we send to the blockchain is ultimately compiled down to this bytecode. For contract creation transactions, the data field of the transaction _is_ this bytecode.
-
-Any system capable of reading the operations contained within this bytecode is said to be `EVM Compatible`.
-
-### Encoding
-
-We also learnt that we can use the encoding functionality of the EVM to encode basically anything. Basic encoding is accomplished with `abi.encode`, but we've a few options available to us.
-
-`abi.encode` will result in a padded return value, however the EVM offers a way to save space/gas by packing our encodings through `abi.encodePacked`.
-
-The EVM also affords us the ability to decode and multi-encode, really giving us flexibility to work with our data.
-
-### Low-level Calls
-
-Lastly we touched on a couple of Solidity's available low-level calls such as `call`, `staticcall`.
-
-The data passed to these functions allows us to make _any_ arbitrary call to an address we want - this is what we'll cover in more detail next.
-
-### Wrap Up
-
-Alright, great work so far. Now's a great time to take a break before we make the final push to the end of this section.
-
-In the next lesson we'll see how these concepts work in practice as we dive into function selector encoding and sending encoded function calls.
-
-Let's go!
+With that said, we're almost done, We've a couple things to tidy up in the section. Let's finish strong.
