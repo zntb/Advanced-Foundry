@@ -1,64 +1,48 @@
-# Verifying a transaction in Metamask
+# NFT Section recap
 
-## Verifying MetaMask Transactions
+## Recap
 
-Possessing this better understanding of encoding empowers us to do something very cool, and that's verify the transactions in our Metamask wallet before signing them.
+Guess what. You just learnt an insane amount in this section. Let's run down the things we covered.
 
-If we write to a contract on Etherscan, a transaction will pop up in our Metamask wallet, by navigating to the HEX tab, we can see the data being sent in this transaction.
+We started off by learning what a `Non-fungible token (NFT)` is. And we explored this technology by creating our very own `BasicNFT`.
 
-We should recognize this calldata as similar to the data we sent in our previous lessons.
+While going through this process, we learnt all about options for decentralized data storage including services like
 
-```solidity
-0xfb37e883000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000076578616d706c6500000000000000000000000000000000000000000000000000
-```
+- **[IPFS](https://ipfs.tech/)**
+- **[Pinata](https://www.pinata.cloud/)**
+- **[NFT Storage](https://nft.storage/)**
+- **[Web3 Storage](https://web3.storage/)**
 
-Foundry includes a cast command which can conveniently decode bytecode like this for us.
+We also learnt that we could store data and image directly on the blockchain by creating a dynamic, on-chain `SVG NFT` that we can use to reflect our mood!
 
-```bash
---calldata-decode: Decode ABI-encoded input data [aliases: cdd]
-```
+While we're able to store this data on chain, it's important to note that it may become prohibitively expensive from the perspective of gas and computation. We proposed protocols such as **[Filecoin](https://filecoin.io/)** and **[Arweave](https://arweave.org/)** which serve to mitigate these concerns in decentralized data storage.
 
-> ❗ **PROTIP**
-> You can run `cast --help` for an exhaustive list of available cast commands!
+Beyond `NFTs` we learnt a great deal about encoding!
 
-Now, if we just run `cast calldata-decode` it's going to tell us we need a function signature (SIG) and our calldata (CALLDATA). We know how we can verify the function signature of our contract easily enough. In the image above, it looks like we're intending to call `"MintNFT(string)"`. What happens when we run:
+We used `base64` encoding to encode our `tokenURI` data to store on-chain.
 
-```bash
-cast sig "mintNFT(string)"
-0xfb37e883
-```
+We explored how a compiled contract is broken into not just an ABI, but a bytecode component and that it's this encoded, binary, bytecode that is read and understood by the EVM.
 
-We can see that this matches the first 4 bytes of the calldata in our Metamask transaction, `0xfb37e883`! Great, now we can verify the calldata being sent with the transaction.
+In addition to this we learnt how to encode our transaction data into this bytecode and how we can make low-level calls using this encoded data. We learnt the power of `abi.encode/abi.decode/abi.encodePacked` and how these globally available methods can allow us fine control over our interactions with the `EVM` and our transactions.
 
-```bash
-cast --calldata-decode "mintNFT(string)" 0xfb37e883000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000076578616d706c6500000000000000000000000000000000000000000000000000
-```
-
-Worked like a charm!
-
-### Signature Collision
-
-There's something important to keep in mind with respect to function signatures. Sometimes, as a quirk of the encoding, two completely different functions will encode into the same function signature.
-
-To see this yourselves, navigate to **[openchain.xyz/signatures](https://openchain.xyz/signatures)**.
-
-In the search field, enter `0x23b872dd`. You'll see that this function signature is attributed to multiple, completely different functions!
-
-Importantly, the Solidity compiler **will not** allow a contract to contain two or more functions which share a selector. You'll receive a compiler error:
-
-I encourage you to try this out yourself in Remix! See if you can find any other conflicting function selectors! This is why it may be important to verify through the contract's code directly, which function is actually being called.
+As a result of our greater understanding of how encoded data is used in EVM transactions, we also gained the ability to verify any transaction sent to our wallet and to keep ourselves safe from malicious ones.
 
 ### Wrap Up
 
-With these new skills we can now verify any transaction proposed to our wallet! This is incredibly valuable, especially when interacting with frontends. You should always be sure the functions you're calling are behaving exactly as you expect them to.
+Now's a great time to take a break. You've made it through another massive section and just by getting this far you've gained skills that only a small selection of Solidity devs have.
 
-In order to verify our transactions we need to:
+You're growing very quickly.
 
-1. Check the address
-   - Verify the contract we're interacting with is what's expected
-2. Check the function selector
-   - Verify the provided function selector vs the function on the contract we expect to be calling
-3. Decode the calldata
-   - Verify the calldata to assure the parameters being sent to the function are what we expect to be sending.
+We've only got a few more sections that remain:
 
-It's too easy to unknowingly send a malicious transaction, but by following these steps you can be sure that your wallet is doing exactly what you intend it to.
+- DeFi
+- Upgradeable Contracts
+- Introduction to Security
+
+The next lesson in particular is going to really put you to the test. So, take your break, and I'll see you when you get back!
+
+🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊
+
+NFT Challenge
+
+**[Sepolia](https://sepolia.etherscan.io/address/0x93c7A945af9c453a8c932bf47683B5eB8C2F8792#code)**
