@@ -1,17 +1,64 @@
-# EVM signatures selectors
+# Verifying a transaction in Metamask
 
-By passing this contract the address of our `CallAnything.sol` deployment. We're able to use the functions it possesses to interact with `CallAnything.sol`
+## Verifying MetaMask Transactions
 
-Before we interact with anything, recall what the values of our storage variables on `CallAnything.sol` are currently.
+Possessing this better understanding of encoding empowers us to do something very cool, and that's verify the transactions in our Metamask wallet before signing them.
 
-Now we can call `callTransferFunctionDirectlyThree` on our `CallFunctionWithoutContract.sol` by passing a new address and amount. This should result in an updating of the storage variables on CallAnything.sol via this low-level call.
+If we write to a contract on Etherscan, a transaction will pop up in our Metamask wallet, by navigating to the HEX tab, we can see the data being sent in this transaction.
 
-## Wrap Up
+We should recognize this calldata as similar to the data we sent in our previous lessons.
 
-Hopefully by now you can see the power available through this methodology of low-level calls. Now, despite hyping it up for several lessons, low-level calls are risky, and it's worth noting that they should be avoided when possible. Use an interface or something similar if you can, because low-level calls can leave you open to a number of potential issues and vulnerabilities.
+```solidity
+0xfb37e883000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000076578616d706c6500000000000000000000000000000000000000000000000000
+```
 
-With that said, you've just learnt some really advanced stuff. If it's a little confusing, don't feel bad, you can always come back later when you've gained a little more experience and context of the EVM
+Foundry includes a cast command which can conveniently decode bytecode like this for us.
 
-If you're excited to learn more about how Solidity works under-the-hood, I recommend reading through the **[Deconstructing Solidity](https://blog.openzeppelin.com/deconstructing-a-solidity-contract-part-i-introduction-832efd2d7737)** series by OpenZeppelin. It does a great job breaking things down in a very digestible and granular way.
+```bash
+--calldata-decode: Decode ABI-encoded input data [aliases: cdd]
+```
 
-With that said, we're almost done, We've a couple things to tidy up in the section. Let's finish strong.
+> ❗ **PROTIP**
+> You can run `cast --help` for an exhaustive list of available cast commands!
+
+Now, if we just run `cast calldata-decode` it's going to tell us we need a function signature (SIG) and our calldata (CALLDATA). We know how we can verify the function signature of our contract easily enough. In the image above, it looks like we're intending to call `"MintNFT(string)"`. What happens when we run:
+
+```bash
+cast sig "mintNFT(string)"
+0xfb37e883
+```
+
+We can see that this matches the first 4 bytes of the calldata in our Metamask transaction, `0xfb37e883`! Great, now we can verify the calldata being sent with the transaction.
+
+```bash
+cast --calldata-decode "mintNFT(string)" 0xfb37e883000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000076578616d706c6500000000000000000000000000000000000000000000000000
+```
+
+Worked like a charm!
+
+### Signature Collision
+
+There's something important to keep in mind with respect to function signatures. Sometimes, as a quirk of the encoding, two completely different functions will encode into the same function signature.
+
+To see this yourselves, navigate to **[openchain.xyz/signatures](https://openchain.xyz/signatures)**.
+
+In the search field, enter `0x23b872dd`. You'll see that this function signature is attributed to multiple, completely different functions!
+
+Importantly, the Solidity compiler **will not** allow a contract to contain two or more functions which share a selector. You'll receive a compiler error:
+
+I encourage you to try this out yourself in Remix! See if you can find any other conflicting function selectors! This is why it may be important to verify through the contract's code directly, which function is actually being called.
+
+### Wrap Up
+
+With these new skills we can now verify any transaction proposed to our wallet! This is incredibly valuable, especially when interacting with frontends. You should always be sure the functions you're calling are behaving exactly as you expect them to.
+
+In order to verify our transactions we need to:
+
+1. Check the address
+   - Verify the contract we're interacting with is what's expected
+2. Check the function selector
+   - Verify the provided function selector vs the function on the contract we expect to be calling
+3. Decode the calldata
+   - Verify the calldata to assure the parameters being sent to the function are what we expect to be sending.
+
+It's too easy to unknowingly send a malicious transaction, but by following these steps you can be sure that your wallet is doing exactly what you intend it to.
