@@ -1,127 +1,204 @@
-# Creating the deployment script
+# Test the DSCEngine smart contract
 
-Once mocks are deployed, we can configure the anvilNetworkConfig with those deployed addresses, and return this struct.
+## Tests
+
+Welcome back! We've added a tonne of functions to our `DSCEngine.sol`, so we're at the point where we want to perform a sanity check and assure everything is working as intended so far.
+
+In the last lesson, we set up a deploy script as well as a `HelperConfig` to assist us in our tests. Let's get started!
+
+Create `test/unit/DSCEngine.t.sol` and begin with the boilerplate we're used to. We know we'll have to import our deploy script as well as `Test`, `DecentralizedStableCoin.sol`, and `DSCEngine.sol`.
 
 ```solidity
-anvilNetworkConfig = NetworkConfig({
-  wethUsdPriceFeed: address(ethUsdPriceFeed), // ETH / USD
-  weth: address(wethMock),
-  wbtcUsdPriceFeed: address(btcUsdPriceFeed),
-  wbtc: address(wbtcMock),
-  deployerKey: DEFAULT_ANVIL_PRIVATE_KEY,
-});
+// SPDX-License-Identifier: MIT
+
+pragma solidity ^0.8.18;
+
+import { DeployDSC } from "../../script/DeployDSC.s.sol";
+import { DSCEngine } from "../../src/DSCEngine.sol";
+import { DecentralizedStableCoin } from "../../src/DecentralizedStableCoin.sol";
+import { Test, console } from "forge-std/Test.sol";
+
+contract DSCEngineTest is Test {}
 ```
 
-Assure you add the `DEFAULT_ANVIL_PRIVATE_KEY` to our growing list of constant state variables.
+Declare our contract/script variables, then in our `setUp` function, we're going to need to deploy our contracts using our `DeployDSC` script.
 
 ```solidity
-uint8 public constant DECIMALS = 8;
-int256 public constant ETH_USD_PRICE = 2000e8;
-int256 public constant BTC_USD_PRICE = 1000e8;
-uint256 public constant DEFAULT_ANVIL_PRIVATE_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-```
+contract DSCEngineTest is Test {
+    DeployDSC deployer;
+    DecentralizedStableCoin dsc;
+    DSCEngine dsce;
 
-Great! With both of these functions written we can update our constructor to determine which function to call based on the block.chainid of our deployment.
-
-```solidity
-constructor() {
-  if (block.chainid == 11155111) {
-    activeNetworkConfig = getSepoliaEthConfig();
-  } else {
-    activeNetworkConfig = getOfCreateAnvilEthConfig();
-  }
+    function setUp public {
+        deployer = new DeployDSC();
+        (dsc, dsce) = deployer.run();
+    }
 }
 ```
 
-With the HelperConfig complete, we can return to DeployDSC.s.sol. Please reference the **[HelperConfig.s.sol within the GitHub repo](https://github.com/Cyfrin/foundry-defi-stablecoin-f23/blob/main/script/HelperConfig.s.sol)** if thing's haven't worked for you, or won't compile at this point.
-
-## Back to DeployDSC
-
-Returning to `DeployDSC.s.sol`, we can now import our HelperConfig and use it to acquire the the parameters for our deployments.
+I think a good place to start will be checking some of our math in `DSCEngine`. We should verify that we're pulling data from our price feeds properly and that our USD calculations are correct.
 
 ```solidity
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+/////////////////
+// Price Tests //
+/////////////////
 
-import { Script } from "forge-std/Script.sol";
-import { DecentralizedStableCoin } from "../src/DecentralizedStableCoin.sol";
-import { DSCEngine } from "../src/DSCEngine.sol";
-import { HelperConfig } from "./HelperConfig.s.sol";
+function testGetUsdValue() public {}
+```
 
+The `getUsdValue` function takes a token address and an amount as a parameter. We could import our mocks for reference here, but instead, let's adjust our `DeployDSC` script to also return our `HelperConfig`. We can acquire these token addresses from this in our test.
+
+```solidity
 contract DeployDSC is Script {
-  function run() external returns (DecentralizedStableCoin, DSCEngine) {
-    HelperConfig config = new HelperConfig();
+    ...
 
-    (
-      address wethUsdPriceFeed,
-      address wbtcUsdPriceFeed,
-      address weth,
-      address wbtc,
-      uint256 deployerKey
-    ) = config.activeNetworkConfig();
-  }
+    function run() external returns (DecentralizedStableCoin, DSCEngine, HelperConfig) {
+        HelperConfig config = new HelperConfig();
+
+        (address wethUsdPriceFeed, address wbtcUsdPriceFeed, address weth, address wbtc, uint256 deployerKey) = config.activeNetworkConfig();
+
+        tokenAddresses = [weth, wbtc];
+        priceFeedAddresses = [wethUsdPriceFeed, wbtcUsdPriceFeed];
+
+        vm.startBroadcast();
+        DecentralizedStableCoin dsc = new DecentralizedStableCoin();
+        DSCEngine engine = new DSCEngine(tokenAddresses, priceFeedAddresses, address(dsc));
+        dsc.transferOwnership(address(engine));
+        vm.stopBroadcast();
+        return (dsc, engine, config);
+    }
 }
 ```
 
-With these values, we can now declare and assign our tokenAddresses and priceFeedAddresses arrays, and finally pass them to our deployments.
+Now, back to our test. We'll need to do a few things in `DSCEngineTest.t.sol`.
+
+- Import our `HelperConfig`
+- Declare state variables for `HelperConfig`, weth and `ethUsdPriceFeed`
+- Acquire the imported config from our `deployer.run` call
+- Acquire `ethUsdPriceFeed` and weth from our `config`'s `activeNetworkConfig`
 
 ```solidity
+// SPDX-License-Identifier: MIT
+
+pragma solidity ^0.8.18;
+
+import { DeployDSC } from "../../script/DeployDSC.s.sol";
+import { DSCEngine } from "../../src/DSCEngine.sol";
+import { DecentralizedStableCoin } from "../../src/DecentralizedStableCoin.sol";
+import { HelperConfig } from "../../script/HelperConfig.s.sol";
+import { Test, console } from "forge-std/Test.sol";
+
+contract DSCEngineTest is Test {
+    DeployDSC deployer;
+    DecentralizedStableCoin dsc;
+    DSCEngine dsce;
+    HelperConfig config;
+    address weth;
+    address ethUsdPriceFeed;
+
+    function setUp public {
+        deployer = new DeployDSC();
+        (dsc, dsce, config) = deployer.run();
+        (ethUsdPriceFeed, , weth, , ) = config.activeNetworkConfig();
+    }
+}
+```
+
+We're now ready to use some of these values in our test function. For our unit test, we'll be requesting the value of `15ETH`, or `15e18`. Our HelperConfig has the ETH/USD price configured at `$2000`. Thus we should expect `30000e18` as a return value from our getUsdValue function. Let's see if that's true.
+
+```solidity
+/////////////////
+// Price Tests //
+/////////////////
+
+function testGetUsdValue() public {
+  // 15e18 * 2,000/ETH = 30,000e18
+  uint256 ethAmount = 15e18;
+  uint256 expectedUsd = 30000e18;
+  uint256 actualUsd = dsce.getUsdValue(weth, ethAmount);
+  assertEq(expectedUsd, actualUsd);
+}
+```
+
+When you're ready, let see how we've done!
+
+```bash
+forge test --mt testGetUsdValue
+```
+
+It works! We're clearly still on track. This is great. It's good practice to test things as you go to avoid getting too far down the rabbit-hole of compounding errors. Sanity checks along the way like this can save you time in having to refactor and change a bunch of code later.
+
+Before moving on, we should write a test for our `depositCollateral` function as well. We'll need to import our `ERC20Mock` in order to test deposits, so let's do that now. We'll also need to declare a `USER` to call these functions with and amount for them to deposit.
+
+```solidity
+import {ERC20Mock} from "@openzeppelin/contracts/mocks/ERC20Mock.sol";
+
 ...
 
-address[] public tokenAddresses;
-address[] public priceFeedAddresses;
+contract DSCEngineTest is Test {
 
-function run() external returns (DecentralizedStableCoin, DSCEngine) {
-    HelperConfig config = new HelperConfig();
+    ...
 
-    (address wethUsdPriceFeed, address wbtcUsdPriceFeed, address weth, address wbtc, uint256 deployerKey) = config.activeNetworkConfig();
+    address public USER = makeAddr("user");
+    uint256 public constant AMOUNT_COLLATERAL = 10 ether;
 
-    tokenAddresses = [weth, wbtc];
-    priceFeedAddresses = [wethUsdPriceFeed, wbtcUsdPriceFeed];
+    ...
 
-    vm.startBroadcast();
-    DecentralizedStableCoin dsc = new DecentralizedStableCoin();
-    DSCEngine engine = new DSCEngine(tokenAddresses, priceFeedAddresses, address(dsc));
-    vm.stopBroadcast();
+    /////////////////////////////
+    // depositCollateral Tests //
+    /////////////////////////////
+
+    function testRevertsIfCollateralZero() public {}
 }
 ```
 
-Things look amazing so far, but there's one last thing we haven't really talked about. I'd mentioned in earlier lessons that we intend the DSCEngine to own and manage the DecentralizedStableCoin assets. DecentralizedStableCoin.sol is Ownable, and by deploying it this way, our msg.sender is going to be the owner by default. Fortunately, the Ownable library comes with the function `transferOwnership`. We'll just need to assure this is called in our deploy script.
+Let's make sure our `USER` has some tokens minted to them in our `setUp`, they'll need them for several tests in our future.
 
 ```solidity
-function run() external returns (DecentralizedStableCoin, DSCEngine) {
-  HelperConfig config = new HelperConfig();
+address public USER = makeAddr("user");
+uint256 public constant AMOUNT_COLLATERAL = 10 ether;
+uint256 public constant STARTING_ERC20_BALANCE = 10 ether;
 
-  (
-    address wethUsdPriceFeed,
-    address wbtcUsdPriceFeed,
-    address weth,
-    address wbtc,
-    uint256 deployerKey
-  ) = config.activeNetworkConfig();
+function setUp public {
+    deployer = new DeployDSC();
+    (dsc, dsce, config) = deployer.run();
+    (ethUsdPriceFeed, , weth, , ) = config.activeNetworkConfig();
 
-  tokenAddresses = [weth, wbtc];
-  priceFeedAddresses = [wethUsdPriceFeed, wbtcUsdPriceFeed];
-
-  vm.startBroadcast();
-  DecentralizedStableCoin dsc = new DecentralizedStableCoin();
-  DSCEngine engine = new DSCEngine(
-    tokenAddresses,
-    priceFeedAddresses,
-    address(dsc)
-  );
-  dsc.transferOwnership(address(engine));
-  vm.stopBroadcast();
-  return (dsc, engine);
+    ERC20Mock(weth).mint(USER, STARTING_ERC20_BALANCE);
 }
 ```
+
+Our user is going to need to approve the `DSCEngine` contract to call `depositCollateral`. Despite this, we're going to deposit `0`. This _should_ cause our function call to revert with our custom error `DSCEngine__NeedsMoreThanZero`, which we'll account for with `vm.expectRevert`.
+
+```solidity
+/////////////////////////////
+// depositCollateral Tests //
+/////////////////////////////
+
+function testRevertsIfCollateralZero() public {
+  vm.startPrank(USER);
+  ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+
+  vm.expectRevert(DSCEngine__NeedsMoreThanZero.selector);
+  dsce.depositCollateral(weth, 0);
+  vm.stopPrank();
+}
+```
+
+Let's run it!
+
+```bash
+forge test --mt testRevertsIfCollateralZero
+```
+
+![image](./assets/defi-tests2.png)
 
 ### Wrap Up
 
-Whew, not much left to say besides: Good work. In the next lesson, we'll be putting these scripts to the test with ... tests.
+I need to mention, there's no _correct_ way to write a contract. I personally am always writing test as I'm writing code. You don't have to write a deploy script for your tests right away either, I like to do this to set up my integration tests as early as possible.
 
-See you there!
+It's important to find a process that works for you and stick to it.
 
-**[DeployDSC.s.sol](https://github.com/Cyfrin/foundry-defi-stablecoin-f23/blob/main/script/DeployDSC.s.sol)**
+These are some great basic tests to begin with, I'm content with these for now. In the next lesson we'll jump back into writing some more functions for our `DSCEngine.sol`.
 
-**[HelperConfig.s.sol](https://github.com/Cyfrin/foundry-defi-stablecoin-f23/blob/main/script/HelperConfig.s.sol)**
+See you soon!
