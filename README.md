@@ -1,56 +1,124 @@
-# DSCEngine advanced testing
+# Create the fuzz tests handler pt.1
 
-## Leveling Up Testing
+## Handler Fuzz Tests
 
-In this lesson we're going on a bit of a sidequest to gain a better understanding of testing in Web3, the types of test methodologies available to us and tools to help us secure our code.
+Ok, welcome back! I hope you had a chance to take a break, and I _also_ hope you took the time to try to write your own tests. Hopefully your `forge coverage` is outputting something closer to this:
 
-There are several layers of testing methodologies which in some ways represent degrees of thoroughness of the testing of a protocol.
+![defi handler fuzz](./assets//defi-handler-fuzz-tests1.png)
 
-> ❗ **NOTE**
-> The information here is brought to us via an interview from the gigabrains Josselin and Troy from Trail of Bits
+If not...I _**strongly**_ encourage you to pause the video and practice writing some tests.
 
-### Layer 1: Unit Tests
+Otherwise, let's continue!
 
-These are the _bare minimum_ of testing in Web3 security. Unit test will propose a specific situation to our function and validate for us that this specific situation works as intended.
+So that we're all on the same page, I suggest taking a look at the GitHub Repo for this course to see what's been added to my contracts and test suite. Quite a bit of refactoring has happened since last lesson.
 
-For example, take the contract below.
+- **[DSCEngineTest.t.sol](https://github.com/Cyfrin/foundry-defi-stablecoin-f23/blob/main/test/unit/DSCEngineTest.t.sol)**
+- **[DSCEngine.sol](https://github.com/Cyfrin/foundry-defi-stablecoin-f23/blob/main/src/DSCEngine.sol)**
+
+One example of an addition made is the internal \_calculateHealthFactor function and the public equivalent calculateHealthFactor. These functions allow us to access expected Health Factors in our tests.
 
 ```solidity
-// SPDX-License-Identifier
-pragma solidity ^0.8.13;
+uint256 expectedHealthFactor =
+dsce.calculateHealthFactor(amountToMint, dsce.getUsdValue(weth, amountCollateral));
+vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, expectedHealthFactor));
+```
 
-contract CaughtWithTest {
-  uint256 public number;
+### The Bug
 
-  function setNumber(uint256 newNumber) public {
-    number = newNumber + 1;
-  }
+In the previous lesson I alluded to there being a severe bug, one of the changes made in the code base since then is mitigating this bug.
+
+Did you find it?
+
+The issue was found in how we calculated our Health Factor originally.
+
+```solidity
+function _healthFactor(address user) private view returns (uint256) {
+  (
+    uint256 totalDscMinted,
+    uint256 collateralValueInUsd
+  ) = _getAccountInformation(user);
+
+  uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
+    LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+
+  return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
 }
 ```
 
-In a situation like this, if the expectation was that `number` is being set to `newNumber`, a unit test would catch this. In our unit test, we would assert our expected outcome and pass a test value to our function:
+In the above, we need to account for when a user has deposited collateral, but hasn't minted DSC. In this circumstance our return value is going to be dividing by zero! Obviously not good, so what we do is account for this with a conditional, if a user's minted DSC == 0, we just set their Health Factor to a massive positive number and return that.
 
 ```solidity
-function testSetNumber() public {
-  uint256 myNumber = 55;
-  caughtWithTest.setNumber(myNumber);
-  assertEq(myNumber, caughtWithTest.number());
+function _calculateHealthFactor(
+  uint256 totalDscMinted,
+  uint256 collateralValueInUsd
+) internal pure returns (uint256) {
+  if (totalDscMinted == 0) return type(uint256).max;
+  uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
+    LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+  return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
 }
 ```
 
-Running this test, we'd see:
+### Change 3
 
-![defi level up testing](./assets//defi-leveling-up-testing1.png)
+The last major change in the repo since our last lesson is the addition to a number of view/getter functions in DSCEngine.sol. This is just to make it easier to interact with the protocol overall.
 
-The unit test catches this right away. All of the most popular frameworks have unit tests built in!
+```solidity
+function getPrecision() external pure returns (uint256) {
+  return PRECISION;
+}
 
-### Layer 2 Fuzz Tests
+function getAdditionalFeedPrecision() external pure returns (uint256) {
+  return ADDITIONAL_FEED_PRECISION;
+}
 
-Fuzz tests are configured to have random inputs supplied to a function in an effort to identify and edgecase which breaks a protocol's invariant.
+function getLiquidationThreshold() external pure returns (uint256) {
+  return LIQUIDATION_THRESHOLD;
+}
 
-An invariant is a property of a protocol which much always hold true. Fuzz testing suites attempt to break these invariants with random data.
+function getLiquidationBonus() external pure returns (uint256) {
+  return LIQUIDATION_BONUS;
+}
 
-Consider a slightly more complex contract such as below.
+function getLiquidationPrecision() external pure returns (uint256) {
+  return LIQUIDATION_PRECISION;
+}
+
+function getMinHealthFactor() external pure returns (uint256) {
+  return MIN_HEALTH_FACTOR;
+}
+
+function getCollateralTokens() external view returns (address[] memory) {
+  return s_collateralTokens;
+}
+
+function getDsc() external view returns (address) {
+  return address(i_dsc);
+}
+
+function getCollateralTokenPriceFeed(
+  address token
+) external view returns (address) {
+  return s_priceFeeds[token];
+}
+
+function getHealthFactor(address user) external view returns (uint256) {
+  return _healthFactor(user);
+}
+```
+
+If you managed to improve your coverage, even if not to this extent, you should be proud of getting this far. This code base is hard to write tests for and a lot of it comes with experience, practice and familiarity.
+
+> ❗ **PROTIP**
+> Repetition is the mother of skill.
+
+### Fuzzing
+
+With all this being said, we're not done yet. We're going to really take a security minded focus and build out a thorough fuzz testing suite as well. While developing a protocol and writing tests, we should always be thinking **"What are my protocol invariants?"**. Having these clearly defined will make advanced testing easier for us to configure.
+
+Let's detail Fuzz Testing at a high-level before diving into it's application.
+
+Fuzz Testing is when you supply random data to a system in an attempt to break it. If you recall the example used in a previous lesson:
 
 ```solidity
 //SPDX-License-Identifier: MIT
@@ -68,104 +136,156 @@ contract MyContract {
 }
 ```
 
-In this simple example, we can easily see that if we pass `2` as an argument to the `doStuff` function, the invariant of `shouldAlwaysBeZero` is broken, but assigning a value of 1. In a more complex function, the edge case may not be so clear, but we can handle complex functions the same way we handle this one.
+In the above `shouldAlwaysBeZero` == 0 is our `invariant`, the property of our system that should always hold. By fuzz testing this code, our test supplies our function with random data until it finds a way to break the function, in this case if 2 was passed as an argument our invariant would break. This is a very simple example, but you could imagine the complexity scaling quickly.
 
-Here's an example of a fuzz test we could perform:
-
-```solidity
-    ...
-    function testIAlwaysGetZeroFuzz(uint256 data) public {
-        myContract.doStuff(data);
-        assert(myContract.shouldAlwaysBeZero() == 0);
-    }
-    ...
-```
-
-You can see, we don't explicitly declare the value for `data` in our test, and instead pass it as an argument to the test function. The Foundry framework will satisfy this argument with random data until it breaks our invariant (or stops based on configurations set). When run, we can see the framework identifies the edge case which breaks our asserted property.
-
-![defi level up testing](./assets//defi-leveling-up-testing2.png)
-
-### Layer 3 Static Analysis
-
-Unit testing and fuzz testing as examples of _**dynamic tests**_, this is when code is actually executed to determine if there's a problem.
-
-Alternatively to this, we have static analysis as a tool available to us. In static analysis testing, a tool such as **[Slither](https://github.com/crytic/slither)** or **[Aderyn](https://github.com/Cyfrin/aderyn)**, will review the code and identify vulnerabilities based on things like layout, ordering and syntax.
+Simple unit test for the above might look something like:
 
 ```solidity
-function withdraw() external {
-  uint256 balance = balances[msg.sender];
-  require(balance > 0);
-  (bool successs, ) = msg.sender.call{ value: balance }("");
-  require(success, "Failed to send Ether");
-  balances[msg.sender] = 0;
+function testIAlwaysGetZero() public {
+  uint256 data = 0;
+  myContract.doStuff(data);
+  assert(myContract.shouldAlwaysBeZero() == 0);
 }
 ```
 
-The above withdraw function has a classic reentrancy attack. We know an issue like this arrises from not following the CEI pattern! A static analysis tool like Slither will be able to pick up on this quite easily.
+The limitation of the above should be clear, we would have the assign data to every value of uin256 in order to assure our invariant is broken... That's too much.
 
-![defi level up testing](./assets//defi-leveling-up-testing3.png)
+Instead we invoke fuzz testing by making a few small changes to the test syntax.
 
-### Layer 4 Formal Verification
+```solidity
+function testIAlwaysGetZero(uint256 data) public {
+  myContract.doStuff(data);
+  assert(myContract.shouldAlwaysBeZero() == 0);
+}
+```
 
-At a high-level, formal verification is the act of proving or disproving a property of a system. It does this by generating a mathematical model of the system and using mathematical proofs to identify if a property can be broken.
+That's it. Now, if we run this test with Foundry, it'll throw random data at our function as many times as we tell it to (we'll discuss runs soon), until it breaks our assertion.
 
-There are many ways to perform formal verification including:
+![defi handler fuzz](./assets/defi-handler-fuzz-tests2.png)
 
-- Symbolic Execution
-- Abstract Interpretation
-- Model Checking
+I'll mention now that the fuzzer isn't using _truly_ random data, it's pseudo-random, and how your fuzzing tool chooses its data matters! Echidna and Foundry are both solid choices in this regard, but I encourage you to research the differences on your own.
 
-We'll only really cover Symbolic Execution in this course. If you want to dive deeper into Symbolic Execution, I encourage you to take a look at **[this video](https://www.youtube.com/watch?v=yRVZPvHYHzw)** by MIT OpenCourseWare for additional context.
+Important properties of the fuzz tests we configure are its `runs` and `depth`.
 
-At a high-level, Symbolic Execution models each path in the code mathematically to identify if any path results in the breaking of an asserted property of the system.
+**Runs:** How many random inputs are provided to our test
+
+In our example, the fuzz tester took 18 random inputs to find our edge case.
+
+However, we can customize how many attempts the fuzzer makes within our foundry.toml by adding a section like:
+
+```toml
+[fuzz]
+runs = 1000
+```
+
+Now, if we adjust our example function...
+
+```solidity
+function doStuff(uint256 data) public {
+  // if (data == 2){
+  //     shouldAlwaysBeZero = 1;
+  // }
+}
+```
+
+... and run the fuzzer again...
+
+![defi handler fuzz](./assets/defi-handler-fuzz-tests4.png)
+
+We can see it will run all .. 1001 runs (I guess zero counts 😅).
+
+Let's look at an example where the fuzz testing we've discussed so far will fail to catch our issue.
+
+### Stateful Fuzz Testing
+
+Take the following contract for example:
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.16;
+pragma solidity ^0.8.18;
 
-contract SmallSol {
-  // Invariant: Must never revert.
-  function f(uint256 a) public returns (uint256) {
-    a = a + 1;
-    return a;
+contract CaughtWithTest {
+  uint256 public shouldAlwaysBeZero = 0;
+  uint256 private hiddenValue = 0;
+
+  function doStuff(uint256 data) public {
+    // if (data == 2) {
+    //     shouldAlwaysBeZero = 1;
+    // }
+    if (hiddenValue == 7) {
+      shouldAlwaysBeZero = 1;
+    }
+    hiddenValue = data;
   }
 }
 ```
 
-In the above simple contract example, the obvious path is returning the `result of a + 1`. Another less obvious path would be this function `f` reverting due to overflow. Symbolic Execution, through it's mathetmatical modelling, would traverse all possible paths, looking for criteria that break our invariant. These paths might be represented something like this:
+In this situation, even if we mitigate the previous issue spotted by our fuzz tester, another remains. We can see in this simple example that if hiddenValue == 7, then our invariant is going to be broken. The problem however is that two subsequent function calls must be made for this to be the case. First, the function must be called wherein data == 7, this will assign 7 to hiddenValue. Then the function must be called again in order for the conditional to break our invariant.
 
-**Path 1:** `assert(a not 2**256 - 1); a:= a+1; return a;`
+What this is describing is the need for our test to account for changes in the state of our contract. This is known as `Stateful Fuzzing`. Our fuzz tests til now have been `Stateless`, which means the state of a run is discarded with each new run.
 
-**Path 2:** `assert(a := 2**256); revert;`
+Stateful Fuzzing allows us to configure tests wherein the ending state of one run is the starting state of the next.
 
-In the first path, a is anything less than uint256.max. In the second path, it's equal to the max and reverts.
+### Stateful Fuzz Test Setup
 
-Both of these situations can't simultaneously be true, so the formal verification solver would take the SMT-LIB code and determine which paths it's able to "satisfy". If path 2 can be satisfied, this represents a breaking of the protocol invariant/property.
+In order to run stateful fuzz testing in Foundry, it requires a little bit of setup. First, we need to import StdInvariant.sol and have our contract inherit this.
 
-> ❗ **NOTE**
-> Formal verification tools use a special language to process the mathematical models of code called SMT_LIB.
+```solidity
+// SPDX-License-Identifier: None
+pragma solidity ^0.8.13;
 
-Some formal verification tools available include things like Manitcore, Halmos and Certora, but even the Solidity Compiler can do many of these steps behind the scenes:
+import { CaughtWithTest } from "src/MyContract.sol";
+import { console, Test } from "forge-std/Test.sol";
+import { StdInvariant } from "forge-std/StdInvariant.sol";
 
-1. Explore Paths
-2. Convert Paths to a set of Boolean expressions
-3. Determine if paths are reachable
+contract MyContractTest is StdInvariant, Test {
+  CaughtWithTest myContract;
 
-You can read more about the Solidity Compiler SMTChecker **[here](https://docs.soliditylang.org/en/v0.8.26/smtchecker.html)**.
+  function setUp() public {
+    myContract = new CaughtWithTest();
+  }
+}
+```
 
-### Limitations of Formal Verification
+The next step is, we need to set a target contract. This will be the contract Foundry calls random functions on. We can do this by calling targetContract in our setUp function.
 
-Now, Formal Verification isn't a silver bullet, it does have its limitations. One of the most common of which is known as the **path explosion problem**. In essence, when a solver is presented with code that is non-deterministic or contains infinite looping, the number of possible paths approaches infinity. When this happens, a solver is unable to resolve a valid proof due to the time and computation necessary to solve.
+```solidity
+contract NFT721Test is StdInvariant, Test {
+  CaughtWithTest myContract;
+
+  function setUp() public {
+    myContract = new CaughtWithTest();
+    targetContract(address(myContract));
+  }
+}
+```
+
+Finally, we just need to write our invariant, we must use the keywords invariant, or fuzz to begin this function name, but otherwise, we only need to declare our assertion, super simple.
+
+```solidity
+function invariant_testAlwaysReturnsZero() public view {
+  assert(myContract.shouldAlwaysBeZero() == 0);
+}
+```
+
+Now, if our fuzzer ever calls our doStuff function with a value of 7, hiddenValue will be assigned 7 and the next time doStuff is called, our invariant should break. Let's run it.
+
+![defi handler fuzz](./assets/defi-handler-fuzz-tests5.png)
+
+We can see in the output the two subsequent function calls that lead to our invariant breaking. First doStuff was called with the argument of `7`, then it was called with `429288169336124586202452331323751966569421912`, but it doesn't matter what it was called with next, we knew our invariant was going to break.
 
 ### Wrap Up
 
-At the end of the day, each testing methodology brings advantages and disadvantages. From my point of view, a thorough fuzz testing suite should be the _bare minimum_ standard in Web3 protocol security in 2024.
+In a real smart contract scenario, the invariant may actually be the most difficult thing to determine. It's unlikely to be something as simple as x shouldn't be zero, it might be something like
 
-It's important to employ a robust and diverse set of testing tools to assure the greatest security coverage of a protocol.
+- `newTokensMinted < inflation rate`
+- A lottery should only have 1 winner
+- A user can only withdraw what they deposit
 
-The Trail of Bits team offers an amazing resource on building secure contracts on secure-contracts.com that is worth a read for everyone getting serious about smart contract security.
+Practice and experience will lend themselves to identifying protocol invariants in time, but this is something you should keep in the back of your mind throughout development.
 
-> ❗ **IMPORTANT**
-> Even all this isn't a guarantee that your code is bug free.
+Stateful/Invariant testing should be the new bare minimum in Web3 security.
 
-Hopefully this has shed some light on the layers of smart contract testing and the importance of a thorough test suite and using the tools available to us. See you in the next lesson where we apply some of this to create a fuzzing test suite for DecentralizedStableCoin!
+In the next lesson we're applying these concepts to our DecentralizedStableCoin protocol.
+
+Get ready, see you soon.
