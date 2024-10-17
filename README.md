@@ -1,118 +1,75 @@
-# Create the fuzz tests handler pt.2
+# Defi Handler Deposit Collateral
 
-## Handler Fuzz Tests
+## Handler - Redeeming Collateral
 
-Now that we've spent time investigating the types of tests available to us, and the strength of methodologies like fuzzing for protocols, we're going to build out our own `Stateful Fuzz Testing` suite for `DecentralizedStableCoin`.
+Ok! In this lesson we're going to adjust the code in our Invariants.t.sol such that our tests are more focused by being routed through a handler contract. In so doing, our tests will have a more sensible order of functions to call and more contexually relavent random data.
 
-Navigate to the **[Fuzz Testing section](https://book.getfoundry.sh/forge/fuzz-testing)** in the Foundry Docs to read more on advanced fuzz testing within this framework.
-
-In our previous fuzz testing examples, we were demonstrating "open testing". This kinda gives control to the framework and allows it to call any functions in a contract randomly, in a random order.
-
-More advanced fuzz tests implement [`handler based testing`](https://book.getfoundry.sh/forge/invariant-testing#handler-based-testing).
-
-Larger protocols will have so many functions available to them that it's important to narrow the focus of our tests for a better chance to find our bugs. This is where handlers come in. They allow us to configure aspects of a contract's state before our tests are run, as well as set targets for the test functions to focus on.
-
-In the example provided by the Foundry Docs, we can see how the functionality of the deposit function can be fine tuned to assure that approvals and mints always occur before deposit is actually called.
+We'll start by creating the Handler.t.sol contract.
 
 ```solidity
-function deposit(uint256 assets) public virtual {
-  asset.mint(address(this), assets);
+// SPDX-License-Identifier: MIT
 
-  asset.approve(address(token), assets);
+pragma solidity 0.8.18;
 
-  uint256 shares = token.deposit(assets, address(this));
+import { Test } from "forge-std/Test.sol";
+
+contract Handler is Test {}
+```
+
+So, what's one of the first things we want to ensure in our handler? How about we tell our framework not to call redeemCollateral unless there's collateral available to redeem. Sounds like a sensible condition.
+
+Because our test function calls are being routed through our Handler, the first thing we should do is make sure our Handler has access to the contracts it'll need to call functions on. Let's import DSCEngine and DecentralizedStableCoin then set these up in our Handler's constructor
+
+```solidity
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.18;
+
+import { Test } from "forge-std/Test.sol";
+import { DSCEngine } from "../../src/DSCEngine.sol";
+import { DecentralizedStableCoin } from "../../src/DecentralizedStableCoin.sol";
+
+contract Handler is Test {
+  DSCEngine dsce;
+  DecentralizedStableCoin dsc;
+
+  constructor(DSCEngine _engine, DecentralizedStableCoin _dsc) {
+    dsce = _engine;
+    dsc = _dsc;
+  }
 }
 ```
 
-To illustrate, as show in the Foundry Docs as well, open testing has our framework calling functions directly as defined in the contracts within scope.
+We know that before `redeemCollateral` is a valid function call, collateral would need to be deposited, so let's begin with writing a `depositCollateral` function. This will work a little differently from our previous fuzz tests, but we're still able to pass arguments to this function which will be randomized by the fuzzer.
 
-![defi handler stateful](./assets/defi-handler-stateful-fuzz-tests1.png)
-Conversely, handler based tests route our frameworks function calls through our handler, allowing us to configure only the functions/behaviour we want it to perform, filtering out bad runs from our tests.
-
-![defi handler stateful](./assets/defi-handler-stateful-fuzz-tests2.png)
-
-Let's finally start applying this methodology to our code base.
-
-### Setup
-
-The first thing we want to do to prepare our stateful fuzzing suite is to configure some of the fuzzer options in our `foundry.toml`.
-
-```toml
-[invariant]
-runs = 128
-depth = 128
-fail_on_revert = false
+```solidity
+function depositCollateral(
+  uint256 collateral,
+  uint256 amountCollateral
+) public {
+  dsce.depositCollateral(collateral, amountCollateral);
+}
 ```
 
-Adding the above to our foundry.toml will configure our fuzz tests to attempt `128 runs` and make `128 calls` in each run (depth). We'll go over `fail_on_revert` in more detail soon.
+Now, the function above is going to fail, and it's going to fail for the same reason our last fuzzing test failed, the `collateral` argument is going to be randomized to a bunch of unauthorized token addresses! In addition to this, `amountCollateral` could _also_ break, because `depositCollateral` reverts on zero!
 
-Next, create the directory `test/fuzz`. We'll need to create 2 files within this folder, `InvariantsTest.t.sol` and `Handler.t.sol`.
+Despite these issues, let's adjust our Invariants.t.sol and try this out.
 
-`InvariantsTest.t.sol` will ultimately hold the tests and the invariants that we assert, while the handler will determine how the protocol functions are called. If our fuzzer makes a call to `depositCollateral` without having minted any collateral, it's kind of a wasted run. We can filter these with an adequate handler configuration.
-
-Before writing a single line of our invariant tests we need to ask the question:
-
-_**What are the invariants of my protocol?**_
-
-We need to ascertain which properties of our system must always hold. What are some for `DecentralizedStableCoin`?
-
-1. The total supply of DSC should be less than the total value of collateral
-2. Getter view functions should never revert
-
-I challenge you to think of more, but these are going to be the two simple invariants we work with here.
-
-### InvariantsTest.t.sol
-
-This file will be setup like any other test file to start, we've lots of practice here.
+Within Invariants.t.sol, import our new Handler contract, declare it, and then set our target to `address(handler)`. Now, if we run our test again, it's going to call only the functions available to our handler.
 
 ```solidity
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.8.18;
 
-import {Test} from "forge-std/Test.sol";
-import {StdInvariant} from "forge-std/StdInvariant.sol";
-
-contract InvariantsTest is StdInvariant Test {}
-```
-
-StdInvariant is quite important for our purposes, this is where we derive the ability to set a `targetContract` which we point to our Handler.
-
-Again, just like the tests we've written so far, we're going to begin with a `setUp` function. In this setUp we'll perform our usual deployments of our needed contracts via our deployment script. We'll import our `HelperConfig` as well.
-
-```solidity
-// SPDX-License-Identifier: MIT
-
-pragma solidity 0.8.18;
-
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {DeployDSC} from "../../script/DeployDSC.s.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
 import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {HelperConfig} from "../../script/HelperConfig.s.sol";
-
-contract InvariantsTest is StdInvariant Test {
-    DeployDSC deployer;
-    DSCEngine dsce;
-    DecentralizedStableCoin dsc;
-    HelperConfig config;
-
-    function setUp() external {
-        deployer = new DeployDSC();
-        (dsc, dsce, config) = deployer.run();
-    }
-}
-```
-
-From this point, it's very easy for us to wrap this up quickly with an Open Testing methodology. All we would need to do is set our `targetContract` to our `DSCEngine (dsce)`, and then declare an invariant in our test function.
-
-In order to test the invariant that our collateral value must always be more than our total supply, we can leverage our `HelperConfig` to acquire the collateral addresses, and check the total balance of each collateral type within the protocol. That would look something like this (don't forget to import your `IERC20 interface` for these tokens):
-
-```solidity
-...
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-...
+
 contract InvariantsTest is StdInvariant Test {
     DeployDSC deployer;
     DSCEngine dsce;
@@ -132,78 +89,143 @@ contract InvariantsTest is StdInvariant Test {
         uint256 totalSupply = dsc.totalSupply();
         uint256 totalWethDeposited = IERC20(weth).balanceOf(address(dsce));
         uint256 totalWbtcDeposited = IERC20(wbtc).balanceOf(address(dsce));
+
+        uint256 wethValue = dsce.getUsdValue(weth, totalWethDeposited);
+        uint256 wbtcValue = dsce.getUsdValue(wbtc, totalWbtcDeposited);
+
+        console.log("totalSupply: ", totalSupply);
+        console.log("wethValue: ", wethValue);
+        console.log("wbtcValue: ", wbtcValue);
+
+        assert(wethValue + wbtcValue >= totalSupply);
     }
 }
 ```
 
-To this point our test function is only acquiring the balanced of our collateral tokens, we'll need to convert this to it's USD value for a sound comparison to our DSC total supply. We can do this with our `getUsdValue` function!
+We can see this fails for the expected reasons below.
+
+![defi handler redeem collateral](./assets/defi-handler-redeem-collateral1.png)
+
+Let's use our Handler to ensure that only _valid_ collateral is deposited. Begin by importing ERC20Mock as we'll need this for our collateral types. In our constructor, we can leverage the getCollateralTokens function added to DSCEngine.sol.
 
 ```solidity
-function invariant_protocolMustHaveMoreValueThanTotalSupply() public view {
-  uint256 totalSupply = dsc.totalSupply();
-  uint256 totalWethDeposited = IERC20(weth).balanceOf(address(dsce));
-  uint256 totalWbtcDeposited = IERC20(wbtc).balanceOf(address(dsce));
+...
+import {ERC20Mock} from "@openzeppelin/contracts/mocks/ERC20Mock.sol";
 
-  uint256 wethValue = dsce.getUsdValue(weth, totalWethDeposited);
-  uint256 wbtcValue = dsce.getUsdValue(wbtc, totalWbtcDeposited);
+contract Handler is Test {
+    DSCEngine dsce;
+    DecentralizedStableCount dsc;
+
+    ERC20Mock weth;
+    ERC20Mock wbtc;
+
+    constructor(DSCEngine _engine, DecentralizedStableCoin _dsc) {
+        dsce = _engine;
+        dsc = _dsc;
+
+        address[] memory collateralTokens = dsce.getCollateralTokens();
+        weth = ERC20Mock(collateralTokens[0]);
+        wbtc = ERC20Mock(collateralTokens[1]);
+    }
+    ...
+```
+
+With these, instead of passing any address as collateral to our depositCollateral functional, we can instead pass a uint256 collateralSeed. We'll next write a function which picks a collateral to deposit from our valid options based on the seed our framework supplies.
+
+```solidity
+// Helper Functions
+function _getCollateralFromSeed(
+  uint256 collateralSeed
+) private view returns (ERC20Mock) {
+  if (collateralSeed % 2 == 0) {
+    return weth;
+  }
+  return wbtc;
 }
 ```
 
-And now, all we would need to do is add our assertion.
+Now, in our depositCollateral function, we can derive which collateral token should be used by calling this function and passing the random seed our framework supplies the test.
 
 ```solidity
-assert(wethValue + wbtcValue > totalSupply);
+function depositCollateral(
+  uint256 collateralSeed,
+  uint256 amountCollateral
+) public {
+  ERC20Mock collateral = _getCollateralFromSeed(collateralSeed);
+  dsce.depositCollateral(address(collateral), amountCollateral);
+}
 ```
 
-With this in place our open invariant test is ready! Try to run it.
-
-> ❗ **PROTIP**
-> Import `console` and add `console.log("Weth Value: ", wethValue)`, `console.log("Wbtc Value: ", wbtcValue)`, `console.log("Total Supply: ", totalSupply)` for more clear readouts from your test.
+Now our test should only call this Handler function with valid collateral addresses! Let's run it and see what happens.
 
 ```bash
-forge test --mt invariant_protocolMustHaveMoreValueThanTotalSupply -vvvv
+forge test --mt invariant_ProtocolTotalSupplyLessThanCollateralValue -vvvv
 ```
 
-![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests3.png)
+![defi handler fuzz](./assets/defi-handler-redeem-collateral2.png)
 
-Our test identified a break in our assertion immediately.. but it's because we have no tokens or collateral. We can adjust our assertion to be `>=`, but it's a little bit cheaty.
+Look! Our address passed is valid, but we're getting a different error `DSCEngine__NeedsMoreThanZero()`. This is actually great progress and shows we've accounted for at least some of the causes of our reverts.
+
+![defi handler fuzz](./assets/defi-handler-redeem-collateral3.png)
+
+Let's keep narrowing the focus of our tests and the validity of our data.
+
+> ❗ **IMPORTANT**
+> Be careful when configuring fail*on_revert to be true \_or* false. Sometimes we risk narrowing our tests too much with our Handler that we miss edge cases.
+
+In the same way we narrowed our test to provide a valid collateral type, we can bind the `amountCollateral` being passed to our function in order to ensure this is greater than 0 and avoid this error. StdUtils has a function we can use called `bound`.
 
 ```solidity
-assert(wethValue + wbtcValue >= totalSupply);
+function depositCollateral(
+  uint256 collateralSeed,
+  uint256 amountCollateral
+) public {
+  amountCollateral = bound(amountCollateral, 1, MAX_DEPOSIT_SIZE);
+  ERC20Mock collateral = _getCollateralFromSeed(collateralSeed);
+  dsce.depositCollateral(address(collateral), amountCollateral);
+}
 ```
 
-![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests4.png)
+We can declare a MAX_DEPOSIT_SIZE constant at the top of our contract. I like to set this to something like type(uint96).max. This will provide a huge number without risking the overflow possible with uint256.
 
-Things pass! We didn't find any issues. This is where we may want to bump up the number of runs we're performing, you can see in the image above our fuzzer executed `128 runs` and `16,384 function calls`. If we bump this up to `1000 runs`, our fuzz test will be more thorough, but will take much longer to run. Try it out!
+```solidity
+uint256 MAX_DEPOSIT_SIZE = type(uint96).max;
+```
 
-![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests5.png)
+![defi handler fuzz](./assets/defi-handler-redeem-collateral4.png)
 
-Things pass again, but you can see how much more intense the test process was. There's a catch, however. In the image above, notice how many calls were made vs how many times a function call reverted. Every single call is reverting! This in essence means that our test wasn't able to _do_ anything. This is not a very reassuring test.
+Not a massive change, but we _have_ made progress on the number of reverts our function it hitting. Running the test again with `fail_on_revert` set to true should reveal what's causing our reverts now.
 
-The reason our test is still passing, despite all these reverts is related to the `fail_on_revert` option we touched on in our `foundry.toml`. If we adjust this to `true` we'll see that our test fails right away.
+![defi handler fuzz](./assets/defi-handler-redeem-collateral5.png)
 
-_**Why are all the calls reverting?**_
+Well, of course this is going to revert! We haven't set an allowance on our tokens! Let's remedy this by leveraging vm.prank in our Handler to ensure appropriate addresses are approved for our deposit function.
 
-Without any guidance, Foundry is going to throw truly random data at the function calls. For example, our `depositCollateral` function is only configured to accept the two authorized tokens for our protocol, wbtc and weth, the fuzzer could be calling this function with thousands of invalid addresses.
+```solidity
+function depositCollateral(
+  uint256 collateralSeed,
+  uint256 amountCollateral
+) public {
+  amountCollateral = bound(amountCollateral, 1, MAX_DEPOSIT_SIZE);
+  ERC20Mock collateral = _getCollateralFromSeed(collateralSeed);
 
-fail_on_revert can be great for quick testing and keeping things simple, but it can be difficult to narrow the validity of our runs when this is set to `false`.
+  // mint and approve!
+  vm.startPrank(msg.sender);
+  collateral.mint(msg.sender, amountCollateral);
+  collateral.approve(address(engine), amountCollateral);
 
-Let's set this option to `true` and run our test once more.
-
-![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests6.png)
-
-We can see the first function being called by the fuzzer is `depositCollateral` and its passing a random `tokenAddress` argument causing our revert immediately.
-
-![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests7.png)
+  engine.depositCollateral(address(collateral), amountCollateral);
+  vm.stopPrank();
+}
+```
 
 ### Wrap Up
 
-We've just done a quick run down on Open Invariant tests for our `DecentralizedStableCoin` protocol, but we've seen some limitations of letting the fuzzer determine how to behave and which functions to call.
+If we run our test now\...
 
-We can do better.
+![defi handler fuzz](./assets/defi-handler-redeem-collateral6.png)
 
-For now, rename `test/fuzz/InvariantsTest.t.sol` to `test/fuzz/OpenInvariantsTest.t.sol`, and comment the whole file out. Create a _new_ file `test/fuzz/Invariants.t.sol`. Copy over OpenInvariants.t.sol into this new file and uncomment. Rename the contract to `Invariants`. We'll be leveling this up soon.
+Woah! We eliminated _**all**_ of the situations that were causing our test to revert! This means we're using our fuzz runs much more efficiently, and no matter how often depositCollateral is called, our totalCollateral will never be less than our totalSupply.
 
-In the next lesson, we'll go over how we can use our `Handler` as the target of our tests to focus which functions in our protocol are called and how. By guiding our tests in this way, we'll be able to assure fewer runs reverts and more valid function calls are made.
+...now, obviously this is the case. We've not written any means for our Handler to mint DSC, so our totalSupply is always zero!
 
-See you in the next one!
+We're going to fix this in the next lesson. See you there!
