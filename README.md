@@ -1,291 +1,209 @@
-# Create the fuzz tests handler pt.1
+# Create the fuzz tests handler pt.2
 
 ## Handler Fuzz Tests
 
-Ok, welcome back! I hope you had a chance to take a break, and I _also_ hope you took the time to try to write your own tests. Hopefully your `forge coverage` is outputting something closer to this:
+Now that we've spent time investigating the types of tests available to us, and the strength of methodologies like fuzzing for protocols, we're going to build out our own `Stateful Fuzz Testing` suite for `DecentralizedStableCoin`.
 
-![defi handler fuzz](./assets//defi-handler-fuzz-tests1.png)
+Navigate to the **[Fuzz Testing section](https://book.getfoundry.sh/forge/fuzz-testing)** in the Foundry Docs to read more on advanced fuzz testing within this framework.
 
-If not...I _**strongly**_ encourage you to pause the video and practice writing some tests.
+In our previous fuzz testing examples, we were demonstrating "open testing". This kinda gives control to the framework and allows it to call any functions in a contract randomly, in a random order.
 
-Otherwise, let's continue!
+More advanced fuzz tests implement [`handler based testing`](https://book.getfoundry.sh/forge/invariant-testing#handler-based-testing).
 
-So that we're all on the same page, I suggest taking a look at the GitHub Repo for this course to see what's been added to my contracts and test suite. Quite a bit of refactoring has happened since last lesson.
+Larger protocols will have so many functions available to them that it's important to narrow the focus of our tests for a better chance to find our bugs. This is where handlers come in. They allow us to configure aspects of a contract's state before our tests are run, as well as set targets for the test functions to focus on.
 
-- **[DSCEngineTest.t.sol](https://github.com/Cyfrin/foundry-defi-stablecoin-f23/blob/main/test/unit/DSCEngineTest.t.sol)**
-- **[DSCEngine.sol](https://github.com/Cyfrin/foundry-defi-stablecoin-f23/blob/main/src/DSCEngine.sol)**
-
-One example of an addition made is the internal \_calculateHealthFactor function and the public equivalent calculateHealthFactor. These functions allow us to access expected Health Factors in our tests.
+In the example provided by the Foundry Docs, we can see how the functionality of the deposit function can be fine tuned to assure that approvals and mints always occur before deposit is actually called.
 
 ```solidity
-uint256 expectedHealthFactor =
-dsce.calculateHealthFactor(amountToMint, dsce.getUsdValue(weth, amountCollateral));
-vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, expectedHealthFactor));
-```
+function deposit(uint256 assets) public virtual {
+  asset.mint(address(this), assets);
 
-### The Bug
+  asset.approve(address(token), assets);
 
-In the previous lesson I alluded to there being a severe bug, one of the changes made in the code base since then is mitigating this bug.
-
-Did you find it?
-
-The issue was found in how we calculated our Health Factor originally.
-
-```solidity
-function _healthFactor(address user) private view returns (uint256) {
-  (
-    uint256 totalDscMinted,
-    uint256 collateralValueInUsd
-  ) = _getAccountInformation(user);
-
-  uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
-    LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
-
-  return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
+  uint256 shares = token.deposit(assets, address(this));
 }
 ```
 
-In the above, we need to account for when a user has deposited collateral, but hasn't minted DSC. In this circumstance our return value is going to be dividing by zero! Obviously not good, so what we do is account for this with a conditional, if a user's minted DSC == 0, we just set their Health Factor to a massive positive number and return that.
+To illustrate, as show in the Foundry Docs as well, open testing has our framework calling functions directly as defined in the contracts within scope.
 
-```solidity
-function _calculateHealthFactor(
-  uint256 totalDscMinted,
-  uint256 collateralValueInUsd
-) internal pure returns (uint256) {
-  if (totalDscMinted == 0) return type(uint256).max;
-  uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
-    LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
-  return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
-}
-```
+![defi handler stateful](./assets/defi-handler-stateful-fuzz-tests1.png)
+Conversely, handler based tests route our frameworks function calls through our handler, allowing us to configure only the functions/behaviour we want it to perform, filtering out bad runs from our tests.
 
-### Change 3
+![defi handler stateful](./assets/defi-handler-stateful-fuzz-tests2.png)
 
-The last major change in the repo since our last lesson is the addition to a number of view/getter functions in DSCEngine.sol. This is just to make it easier to interact with the protocol overall.
+Let's finally start applying this methodology to our code base.
 
-```solidity
-function getPrecision() external pure returns (uint256) {
-  return PRECISION;
-}
+### Setup
 
-function getAdditionalFeedPrecision() external pure returns (uint256) {
-  return ADDITIONAL_FEED_PRECISION;
-}
-
-function getLiquidationThreshold() external pure returns (uint256) {
-  return LIQUIDATION_THRESHOLD;
-}
-
-function getLiquidationBonus() external pure returns (uint256) {
-  return LIQUIDATION_BONUS;
-}
-
-function getLiquidationPrecision() external pure returns (uint256) {
-  return LIQUIDATION_PRECISION;
-}
-
-function getMinHealthFactor() external pure returns (uint256) {
-  return MIN_HEALTH_FACTOR;
-}
-
-function getCollateralTokens() external view returns (address[] memory) {
-  return s_collateralTokens;
-}
-
-function getDsc() external view returns (address) {
-  return address(i_dsc);
-}
-
-function getCollateralTokenPriceFeed(
-  address token
-) external view returns (address) {
-  return s_priceFeeds[token];
-}
-
-function getHealthFactor(address user) external view returns (uint256) {
-  return _healthFactor(user);
-}
-```
-
-If you managed to improve your coverage, even if not to this extent, you should be proud of getting this far. This code base is hard to write tests for and a lot of it comes with experience, practice and familiarity.
-
-> ❗ **PROTIP**
-> Repetition is the mother of skill.
-
-### Fuzzing
-
-With all this being said, we're not done yet. We're going to really take a security minded focus and build out a thorough fuzz testing suite as well. While developing a protocol and writing tests, we should always be thinking **"What are my protocol invariants?"**. Having these clearly defined will make advanced testing easier for us to configure.
-
-Let's detail Fuzz Testing at a high-level before diving into it's application.
-
-Fuzz Testing is when you supply random data to a system in an attempt to break it. If you recall the example used in a previous lesson:
-
-```solidity
-//SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract MyContract {
-  uint256 public shouldAlwaysBeZero = 0;
-  uint256 hiddenValue = 0;
-
-  function doStuff(uint256 data) public {
-    if (data == 2) {
-      shouldAlwaysBeZero = 1;
-    }
-  }
-}
-```
-
-In the above `shouldAlwaysBeZero` == 0 is our `invariant`, the property of our system that should always hold. By fuzz testing this code, our test supplies our function with random data until it finds a way to break the function, in this case if 2 was passed as an argument our invariant would break. This is a very simple example, but you could imagine the complexity scaling quickly.
-
-Simple unit test for the above might look something like:
-
-```solidity
-function testIAlwaysGetZero() public {
-  uint256 data = 0;
-  myContract.doStuff(data);
-  assert(myContract.shouldAlwaysBeZero() == 0);
-}
-```
-
-The limitation of the above should be clear, we would have the assign data to every value of uin256 in order to assure our invariant is broken... That's too much.
-
-Instead we invoke fuzz testing by making a few small changes to the test syntax.
-
-```solidity
-function testIAlwaysGetZero(uint256 data) public {
-  myContract.doStuff(data);
-  assert(myContract.shouldAlwaysBeZero() == 0);
-}
-```
-
-That's it. Now, if we run this test with Foundry, it'll throw random data at our function as many times as we tell it to (we'll discuss runs soon), until it breaks our assertion.
-
-![defi handler fuzz](./assets/defi-handler-fuzz-tests2.png)
-
-I'll mention now that the fuzzer isn't using _truly_ random data, it's pseudo-random, and how your fuzzing tool chooses its data matters! Echidna and Foundry are both solid choices in this regard, but I encourage you to research the differences on your own.
-
-Important properties of the fuzz tests we configure are its `runs` and `depth`.
-
-**Runs:** How many random inputs are provided to our test
-
-In our example, the fuzz tester took 18 random inputs to find our edge case.
-
-However, we can customize how many attempts the fuzzer makes within our foundry.toml by adding a section like:
+The first thing we want to do to prepare our stateful fuzzing suite is to configure some of the fuzzer options in our `foundry.toml`.
 
 ```toml
-[fuzz]
-runs = 1000
+[invariant]
+runs = 128
+depth = 128
+fail_on_revert = false
 ```
 
-Now, if we adjust our example function...
+Adding the above to our foundry.toml will configure our fuzz tests to attempt `128 runs` and make `128 calls` in each run (depth). We'll go over `fail_on_revert` in more detail soon.
 
-```solidity
-function doStuff(uint256 data) public {
-  // if (data == 2){
-  //     shouldAlwaysBeZero = 1;
-  // }
-}
-```
+Next, create the directory `test/fuzz`. We'll need to create 2 files within this folder, `InvariantsTest.t.sol` and `Handler.t.sol`.
 
-... and run the fuzzer again...
+`InvariantsTest.t.sol` will ultimately hold the tests and the invariants that we assert, while the handler will determine how the protocol functions are called. If our fuzzer makes a call to `depositCollateral` without having minted any collateral, it's kind of a wasted run. We can filter these with an adequate handler configuration.
 
-![defi handler fuzz](./assets/defi-handler-fuzz-tests4.png)
+Before writing a single line of our invariant tests we need to ask the question:
 
-We can see it will run all .. 1001 runs (I guess zero counts 😅).
+_**What are the invariants of my protocol?**_
 
-Let's look at an example where the fuzz testing we've discussed so far will fail to catch our issue.
+We need to ascertain which properties of our system must always hold. What are some for `DecentralizedStableCoin`?
 
-### Stateful Fuzz Testing
+1. The total supply of DSC should be less than the total value of collateral
+2. Getter view functions should never revert
 
-Take the following contract for example:
+I challenge you to think of more, but these are going to be the two simple invariants we work with here.
+
+### InvariantsTest.t.sol
+
+This file will be setup like any other test file to start, we've lots of practice here.
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
 
-contract CaughtWithTest {
-  uint256 public shouldAlwaysBeZero = 0;
-  uint256 private hiddenValue = 0;
+pragma solidity 0.8.18;
 
-  function doStuff(uint256 data) public {
-    // if (data == 2) {
-    //     shouldAlwaysBeZero = 1;
-    // }
-    if (hiddenValue == 7) {
-      shouldAlwaysBeZero = 1;
+import {Test} from "forge-std/Test.sol";
+import {StdInvariant} from "forge-std/StdInvariant.sol";
+
+contract InvariantsTest is StdInvariant Test {}
+```
+
+StdInvariant is quite important for our purposes, this is where we derive the ability to set a `targetContract` which we point to our Handler.
+
+Again, just like the tests we've written so far, we're going to begin with a `setUp` function. In this setUp we'll perform our usual deployments of our needed contracts via our deployment script. We'll import our `HelperConfig` as well.
+
+```solidity
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.18;
+
+import {Test} from "forge-std/Test.sol";
+import {StdInvariant} from "forge-std/StdInvariant.sol";
+import {DeployDSC} from "../../script/DeployDSC.s.sol";
+import {DSCEngine} from "../../src/DSCEngine.sol";
+import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
+import {HelperConfig} from "../../script/HelperConfig.s.sol";
+
+contract InvariantsTest is StdInvariant Test {
+    DeployDSC deployer;
+    DSCEngine dsce;
+    DecentralizedStableCoin dsc;
+    HelperConfig config;
+
+    function setUp() external {
+        deployer = new DeployDSC();
+        (dsc, dsce, config) = deployer.run();
     }
-    hiddenValue = data;
-  }
 }
 ```
 
-In this situation, even if we mitigate the previous issue spotted by our fuzz tester, another remains. We can see in this simple example that if hiddenValue == 7, then our invariant is going to be broken. The problem however is that two subsequent function calls must be made for this to be the case. First, the function must be called wherein data == 7, this will assign 7 to hiddenValue. Then the function must be called again in order for the conditional to break our invariant.
+From this point, it's very easy for us to wrap this up quickly with an Open Testing methodology. All we would need to do is set our `targetContract` to our `DSCEngine (dsce)`, and then declare an invariant in our test function.
 
-What this is describing is the need for our test to account for changes in the state of our contract. This is known as `Stateful Fuzzing`. Our fuzz tests til now have been `Stateless`, which means the state of a run is discarded with each new run.
-
-Stateful Fuzzing allows us to configure tests wherein the ending state of one run is the starting state of the next.
-
-### Stateful Fuzz Test Setup
-
-In order to run stateful fuzz testing in Foundry, it requires a little bit of setup. First, we need to import StdInvariant.sol and have our contract inherit this.
+In order to test the invariant that our collateral value must always be more than our total supply, we can leverage our `HelperConfig` to acquire the collateral addresses, and check the total balance of each collateral type within the protocol. That would look something like this (don't forget to import your `IERC20 interface` for these tokens):
 
 ```solidity
-// SPDX-License-Identifier: None
-pragma solidity ^0.8.13;
+...
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+...
+contract InvariantsTest is StdInvariant Test {
+    DeployDSC deployer;
+    DSCEngine dsce;
+    DecentralizedStableCoin dsc;
+    HelperConfig config;
+    address weth;
+    address wbtc;
 
-import { CaughtWithTest } from "src/MyContract.sol";
-import { console, Test } from "forge-std/Test.sol";
-import { StdInvariant } from "forge-std/StdInvariant.sol";
+    function setUp() external {
+        deployer = new DeployDSC();
+        (dsc, dsce, config) = deployer.run();
+        (,,weth, wbtc, ) = config.activeNetworkConfig();
+        targetContract(address(dsce));
+    }
 
-contract MyContractTest is StdInvariant, Test {
-  CaughtWithTest myContract;
-
-  function setUp() public {
-    myContract = new CaughtWithTest();
-  }
+    function invariant_protocolMustHaveMoreValueThanTotalSupply() public view {
+        uint256 totalSupply = dsc.totalSupply();
+        uint256 totalWethDeposited = IERC20(weth).balanceOf(address(dsce));
+        uint256 totalWbtcDeposited = IERC20(wbtc).balanceOf(address(dsce));
+    }
 }
 ```
 
-The next step is, we need to set a target contract. This will be the contract Foundry calls random functions on. We can do this by calling targetContract in our setUp function.
+To this point our test function is only acquiring the balanced of our collateral tokens, we'll need to convert this to it's USD value for a sound comparison to our DSC total supply. We can do this with our `getUsdValue` function!
 
 ```solidity
-contract NFT721Test is StdInvariant, Test {
-  CaughtWithTest myContract;
+function invariant_protocolMustHaveMoreValueThanTotalSupply() public view {
+  uint256 totalSupply = dsc.totalSupply();
+  uint256 totalWethDeposited = IERC20(weth).balanceOf(address(dsce));
+  uint256 totalWbtcDeposited = IERC20(wbtc).balanceOf(address(dsce));
 
-  function setUp() public {
-    myContract = new CaughtWithTest();
-    targetContract(address(myContract));
-  }
+  uint256 wethValue = dsce.getUsdValue(weth, totalWethDeposited);
+  uint256 wbtcValue = dsce.getUsdValue(wbtc, totalWbtcDeposited);
 }
 ```
 
-Finally, we just need to write our invariant, we must use the keywords invariant, or fuzz to begin this function name, but otherwise, we only need to declare our assertion, super simple.
+And now, all we would need to do is add our assertion.
 
 ```solidity
-function invariant_testAlwaysReturnsZero() public view {
-  assert(myContract.shouldAlwaysBeZero() == 0);
-}
+assert(wethValue + wbtcValue > totalSupply);
 ```
 
-Now, if our fuzzer ever calls our doStuff function with a value of 7, hiddenValue will be assigned 7 and the next time doStuff is called, our invariant should break. Let's run it.
+With this in place our open invariant test is ready! Try to run it.
 
-![defi handler fuzz](./assets/defi-handler-fuzz-tests5.png)
+> ❗ **PROTIP**
+> Import `console` and add `console.log("Weth Value: ", wethValue)`, `console.log("Wbtc Value: ", wbtcValue)`, `console.log("Total Supply: ", totalSupply)` for more clear readouts from your test.
 
-We can see in the output the two subsequent function calls that lead to our invariant breaking. First doStuff was called with the argument of `7`, then it was called with `429288169336124586202452331323751966569421912`, but it doesn't matter what it was called with next, we knew our invariant was going to break.
+```bash
+forge test --mt invariant_protocolMustHaveMoreValueThanTotalSupply -vvvv
+```
+
+![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests3.png)
+
+Our test identified a break in our assertion immediately.. but it's because we have no tokens or collateral. We can adjust our assertion to be `>=`, but it's a little bit cheaty.
+
+```solidity
+assert(wethValue + wbtcValue >= totalSupply);
+```
+
+![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests4.png)
+
+Things pass! We didn't find any issues. This is where we may want to bump up the number of runs we're performing, you can see in the image above our fuzzer executed `128 runs` and `16,384 function calls`. If we bump this up to `1000 runs`, our fuzz test will be more thorough, but will take much longer to run. Try it out!
+
+![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests5.png)
+
+Things pass again, but you can see how much more intense the test process was. There's a catch, however. In the image above, notice how many calls were made vs how many times a function call reverted. Every single call is reverting! This in essence means that our test wasn't able to _do_ anything. This is not a very reassuring test.
+
+The reason our test is still passing, despite all these reverts is related to the `fail_on_revert` option we touched on in our `foundry.toml`. If we adjust this to `true` we'll see that our test fails right away.
+
+_**Why are all the calls reverting?**_
+
+Without any guidance, Foundry is going to throw truly random data at the function calls. For example, our `depositCollateral` function is only configured to accept the two authorized tokens for our protocol, wbtc and weth, the fuzzer could be calling this function with thousands of invalid addresses.
+
+fail_on_revert can be great for quick testing and keeping things simple, but it can be difficult to narrow the validity of our runs when this is set to `false`.
+
+Let's set this option to `true` and run our test once more.
+
+![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests6.png)
+
+We can see the first function being called by the fuzzer is `depositCollateral` and its passing a random `tokenAddress` argument causing our revert immediately.
+
+![defi handler fuzz](./assets/defi-handler-stateful-fuzz-tests7.png)
 
 ### Wrap Up
 
-In a real smart contract scenario, the invariant may actually be the most difficult thing to determine. It's unlikely to be something as simple as x shouldn't be zero, it might be something like
+We've just done a quick run down on Open Invariant tests for our `DecentralizedStableCoin` protocol, but we've seen some limitations of letting the fuzzer determine how to behave and which functions to call.
 
-- `newTokensMinted < inflation rate`
-- A lottery should only have 1 winner
-- A user can only withdraw what they deposit
+We can do better.
 
-Practice and experience will lend themselves to identifying protocol invariants in time, but this is something you should keep in the back of your mind throughout development.
+For now, rename `test/fuzz/InvariantsTest.t.sol` to `test/fuzz/OpenInvariantsTest.t.sol`, and comment the whole file out. Create a _new_ file `test/fuzz/Invariants.t.sol`. Copy over OpenInvariants.t.sol into this new file and uncomment. Rename the contract to `Invariants`. We'll be leveling this up soon.
 
-Stateful/Invariant testing should be the new bare minimum in Web3 security.
+In the next lesson, we'll go over how we can use our `Handler` as the target of our tests to focus which functions in our protocol are called and how. By guiding our tests in this way, we'll be able to assure fewer runs reverts and more valid function calls are made.
 
-In the next lesson we're applying these concepts to our DecentralizedStableCoin protocol.
-
-Get ready, see you soon.
+See you in the next one!
