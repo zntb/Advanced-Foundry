@@ -1,5 +1,5 @@
 {
-  "cSpell.words": ["Cyfrin", "foundryup"],
+  "cSpell.words": ["Cyfrin", "defi", "edgecase", "foundryup"],
 
   "[solidity]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",

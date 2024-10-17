@@ -1,619 +1,171 @@
-# Refactor liquidations
+# DSCEngine advanced testing
+
+## Leveling Up Testing
+
+In this lesson we're going on a bit of a sidequest to gain a better understanding of testing in Web3, the types of test methodologies available to us and tools to help us secure our code.
+
+There are several layers of testing methodologies which in some ways represent degrees of thoroughness of the testing of a protocol.
+
+> ❗ **NOTE**
+> The information here is brought to us via an interview from the gigabrains Josselin and Troy from Trail of Bits
+
+### Layer 1: Unit Tests
+
+These are the _bare minimum_ of testing in Web3 security. Unit test will propose a specific situation to our function and validate for us that this specific situation works as intended.
+
+For example, take the contract below.
 
 ```solidity
-// Layout of Contract:
-// version
-// imports
-// errors
-// interfaces, libraries, contracts
-// Type declarations
-// State variables
-// Events
-// Modifiers
-// Functions
+// SPDX-License-Identifier
+pragma solidity ^0.8.13;
 
-// Layout of Functions:
-// constructor
-// receive function (if exists)
-// fallback function (if exists)
-// external
-// public
-// internal
-// private
-// internal & private view & pure functions
-// external & public view & pure functions
+contract CaughtWithTest {
+  uint256 public number;
 
+  function setNumber(uint256 newNumber) public {
+    number = newNumber + 1;
+  }
+}
+```
+
+In a situation like this, if the expectation was that `number` is being set to `newNumber`, a unit test would catch this. In our unit test, we would assert our expected outcome and pass a test value to our function:
+
+```solidity
+function testSetNumber() public {
+  uint256 myNumber = 55;
+  caughtWithTest.setNumber(myNumber);
+  assertEq(myNumber, caughtWithTest.number());
+}
+```
+
+Running this test, we'd see:
+
+![defi level up testing](./assets//defi-leveling-up-testing1.png)
+
+The unit test catches this right away. All of the most popular frameworks have unit tests built in!
+
+### Layer 2 Fuzz Tests
+
+Fuzz tests are configured to have random inputs supplied to a function in an effort to identify and edgecase which breaks a protocol's invariant.
+
+An invariant is a property of a protocol which much always hold true. Fuzz testing suites attempt to break these invariants with random data.
+
+Consider a slightly more complex contract such as below.
+
+```solidity
+//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract MyContract {
+  uint256 public shouldAlwaysBeZero = 0;
+  uint256 hiddenValue = 0;
+
+  function doStuff(uint256 data) public {
+    if (data == 2) {
+      shouldAlwaysBeZero = 1;
+    }
+  }
+}
+```
+
+In this simple example, we can easily see that if we pass `2` as an argument to the `doStuff` function, the invariant of `shouldAlwaysBeZero` is broken, but assigning a value of 1. In a more complex function, the edge case may not be so clear, but we can handle complex functions the same way we handle this one.
+
+Here's an example of a fuzz test we could perform:
+
+```solidity
+    ...
+    function testIAlwaysGetZeroFuzz(uint256 data) public {
+        myContract.doStuff(data);
+        assert(myContract.shouldAlwaysBeZero() == 0);
+    }
+    ...
+```
+
+You can see, we don't explicitly declare the value for `data` in our test, and instead pass it as an argument to the test function. The Foundry framework will satisfy this argument with random data until it breaks our invariant (or stops based on configurations set). When run, we can see the framework identifies the edge case which breaks our asserted property.
+
+![defi level up testing](./assets//defi-leveling-up-testing2.png)
+
+### Layer 3 Static Analysis
+
+Unit testing and fuzz testing as examples of _**dynamic tests**_, this is when code is actually executed to determine if there's a problem.
+
+Alternatively to this, we have static analysis as a tool available to us. In static analysis testing, a tool such as **[Slither](https://github.com/crytic/slither)** or **[Aderyn](https://github.com/Cyfrin/aderyn)**, will review the code and identify vulnerabilities based on things like layout, ordering and syntax.
+
+```solidity
+function withdraw() external {
+  uint256 balance = balances[msg.sender];
+  require(balance > 0);
+  (bool successs, ) = msg.sender.call{ value: balance }("");
+  require(success, "Failed to send Ether");
+  balances[msg.sender] = 0;
+}
+```
+
+The above withdraw function has a classic reentrancy attack. We know an issue like this arrises from not following the CEI pattern! A static analysis tool like Slither will be able to pick up on this quite easily.
+
+![defi level up testing](./assets//defi-leveling-up-testing3.png)
+
+### Layer 4 Formal Verification
+
+At a high-level, formal verification is the act of proving or disproving a property of a system. It does this by generating a mathematical model of the system and using mathematical proofs to identify if a property can be broken.
+
+There are many ways to perform formal verification including:
+
+- Symbolic Execution
+- Abstract Interpretation
+- Model Checking
+
+We'll only really cover Symbolic Execution in this course. If you want to dive deeper into Symbolic Execution, I encourage you to take a look at **[this video](https://www.youtube.com/watch?v=yRVZPvHYHzw)** by MIT OpenCourseWare for additional context.
+
+At a high-level, Symbolic Execution models each path in the code mathematically to identify if any path results in the breaking of an asserted property of the system.
+
+```solidity
 // SPDX-License-Identifier: MIT
+pragma solidity ^0.8.16;
 
-pragma solidity 0.8.18;
-
-import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { DecentralizedStableCoin } from "./DecentralizedStableCoin.sol";
-import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-
-/*
- * @title DSCEngine
- * @author Patrick Collins
- *
- * The system is designed to be as minimal as possible, and have the tokens maintain a 1 token == $1 peg at all times.
- * This is a stablecoin with the properties:
- * - Exogenously Collateralized
- * - Dollar Pegged
- * - Algorithmically Stable
- *
- * It is similar to DAI if DAI had no governance, no fees, and was backed by only WETH and WBTC.
- *
- * Our DSC system should always be "overcollateralized". At no point, should the value of
- * all collateral < the $ backed value of all the DSC.
- *
- * @notice This contract is the core of the Decentralized Stablecoin system. It handles all the logic
- * for minting and redeeming DSC, as well as depositing and withdrawing collateral.
- * @notice This contract is based on the MakerDAO DSS system
- */
-contract DSCEngine is ReentrancyGuard {
-  ///////////////////
-  //     Errors    //
-  ///////////////////
-
-  error DSCEngine__TokenAddressesAndPriceFeedAddressesAmountsDontMatch();
-  error DSCEngine__NeedsMoreThanZero();
-  error DSCEngine__TokenNotAllowed(address token);
-  error DSCEngine__TransferFailed();
-  error DSCEngine__BreaksHealthFactor(uint256 healthFactor);
-  error DSCEngine__MintFailed();
-  error DSCEngine__HealthFactorOk();
-
-  /////////////////////////
-  //   State Variables   //
-  /////////////////////////
-
-  mapping(address token => address priceFeed) private s_priceFeeds;
-  DecentralizedStableCoin private immutable i_dsc;
-  mapping(address user => mapping(address token => uint256 amount))
-    private s_collateralDeposited;
-  mapping(address user => uint256 amountDscMinted) private s_DSCMinted;
-  address[] private s_collateralTokens;
-
-  uint256 private constant ADDITIONAL_FEED_PRECISION = 1e10;
-  uint256 private constant PRECISION = 1e18;
-  uint256 private constant LIQUIDATION_THRESHOLD = 50;
-  uint256 private constant LIQUIDATION_PRECISION = 100;
-  uint256 private constant MIN_HEALTH_FACTOR = 1e18;
-  uint256 private constant LIQUIDATION_BONUS = 10;
-
-  ////////////////
-  //   Events   //
-  ////////////////
-
-  event CollateralDeposited(
-    address indexed user,
-    address indexed token,
-    uint256 indexed amount
-  );
-  event CollateralRedeemed(
-    address indexed user,
-    address indexed token,
-    uint256 indexed amount
-  );
-
-  ///////////////////
-  //   Modifiers   //
-  ///////////////////
-
-  modifier moreThanZero(uint256 amount) {
-    if (amount <= 0) {
-      revert DSCEngine__NeedsMoreThanZero();
-    }
-    _;
-  }
-
-  modifier isAllowedToken(address token) {
-    if (s_priceFeeds[token] == address(0)) {
-      revert DSCEngine__TokenNotAllowed(token);
-    }
-    _;
-  }
-
-  ///////////////////
-  //   Functions   //
-  ///////////////////
-
-  constructor(
-    address[] memory tokenAddresses,
-    address[] memory priceFeedAddresses,
-    address dscAddress
-  ) {
-    if (tokenAddresses.length != priceFeedAddresses.length) {
-      revert DSCEngine__TokenAddressesAndPriceFeedAddressesMustBeSameLength();
-    }
-
-    for (uint256 i = 0; i < tokenAddresses.length; i++) {
-      s_priceFeeds[tokenAddresses[i]] = priceFeedAddresses[i];
-      s_collateralTokens.push(tokenAddresses[i]);
-    }
-    i_dsc = DecentralizedStableCoin(dscAddress);
-  }
-
-  ///////////////////////////
-  //   External Functions  //
-  ///////////////////////////
-
-  /*
-   * @param tokenCollateralAddress: The ERC20 token address of the collateral you're depositing
-   * @param amountCollateral: The amount of collateral you're depositing
-   */
-  function depositCollateral(
-    address tokenCollateralAddress,
-    uint256 amountCollateral
-  )
-    external
-    moreThanZero(amountCollateral)
-    nonReentrant
-    isAllowedToken(tokenCollateralAddress)
-  {
-    s_collateralDeposited[msg.sender][
-      tokenCollateralAddress
-    ] += amountCollateral;
-    emit CollateralDeposited(
-      msg.sender,
-      tokenCollateralAddress,
-      amountCollateral
-    );
-    bool success = IERC20(tokenCollateralAddress).transferFrom(
-      msg.sender,
-      address(this),
-      amountCollateral
-    );
-    if (!success) {
-      revert DSCEngine__TransferFailed();
-    }
-  }
-
-  /*
-   * @param amountDscToMint: The amount of DSC you want to mint
-   * You can only mint DSC if you hav enough collateral
-   */
-  function mintDsc(
-    uint256 amountDscToMint
-  ) external moreThanZero(amountDscToMint) nonReentrant {
-    s_DSCMinted[msg.sender] += amountDscToMint;
-    _revertIfHealthFactorIsBroken(msg.sender);
-    bool minted = i_dsc.mint(msg.sender, amountDscToMint);
-
-    if (!minted) {
-      revert DSCEngine__MintFailed();
-    }
-  }
-
-  /*
-   * @param tokenCollateralAddress: the collateral address to redeem
-   * @param amountCollateral: amount of collateral to redeem
-   * @param amountDscToBurn: amount of DSC to burn
-   * This function burns DSC and redeems underlying collateral in one transaction
-   */
-  function redeemCollateralForDsc(
-    address tokenCollateralAddress,
-    uint256 amountCollateral,
-    uint256 amountDscToBurn
-  ) external {
-    burnDsc(amountDscToBurn);
-    redeemCollateral(tokenCollateralAddress, amountCollateral);
-  }
-
-  /*
-    * @param collateral: The ERC20 token address of the collateral you're using to make the protocol solvent again.
-    * This is collateral that you're going to take from the user who is insolvent.
-    * In return, you have to burn your DSC to pay off their debt, but you don't pay off your own.
-    * @param user: The user who is insolvent. They have to have a _healthFactor below MIN_HEALTH_FACTOR
-    * @param debtToCover: The amount of DSC you want to burn to cover the user's debt.
-    *
-    * @notice: You can partially liquidate a user.
-    * @notice: You will get a 10% LIQUIDATION_BONUS for taking the users funds.
-    * @notice: This function working assumes that the protocol will be roughly 150% overcollateralized in order for this
-    to work.
-    * @notice: A known bug would be if the protocol was only 100% collateralized, we wouldn't be able to liquidate
-    anyone.
-    * For example, if the price of the collateral plummeted before anyone could be liquidated.
-    */
-  function liquidate(
-    address collateral,
-    address user,
-    uint256 debtToCover
-  ) external moreThanZero(debtToCover) nonReentrant {
-    uint256 startingUserHealthFactor = _healthFactor(user);
-    if (startingUserHealthFactor > MIN_HEALTH_FACTOR) {
-      revert DSCEngine__HealthFactorOk();
-    }
-    uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(
-      collateral,
-      debtToCover
-    );
-
-    uint256 bonusCollateral = (tokeAmountFromDebtCovered * LIQUIDATION_BONUS) /
-      LIQUIDATION_PRECISION;
-
-    uint256 totalCollateralRedeemed = tokenAmountFromDebtCovered +
-      bonusCollateral;
-  }
-
-  /////////////////////////
-  //   Public Functions  //
-  /////////////////////////
-
-  function redeemCollateral(
-    address tokenCollateralAddress,
-    uint256 amountCollateral
-  ) public moreThanZero(amountCollateral) nonReentrant {
-    s_collateralDeposited[msg.sender][
-      tokenCollateralAddress
-    ] -= amountCollateral;
-    emit CollateralRedeemed(
-      msg.sender,
-      tokenCollateralAddress,
-      amountCollateral
-    );
-
-    bool success = IERC20(tokenCollateralAddress).transfer(
-      msg.sender,
-      amountCollateral
-    );
-    if (!success) {
-      revert DSCEngine__TransferFailed();
-    }
-
-    _revertIfHealthFactorIsBroken(msg.sender);
-  }
-
-  function burnDsc(uint256 amount) public moreThanZero(amount) {
-    s_DSCMinted[msg.sender] -= amount;
-    bool success = i_dsc.transferFrom(msg.sender, address(this), amount);
-    if (!success) {
-      revert DSCEngine__TransferFailed();
-    }
-    i_dsc.burn(amount);
-    _revertIfHealthFactorIsBroken(msg.sender);
-  }
-
-  ///////////////////////////////////////////
-  //   Private & Internal View Functions   //
-  ///////////////////////////////////////////
-
-  /*
-   * Returns how close to liquidation a user is
-   * If a user goes below 1, then they can be liquidated.
-   */
-  function _healthFactor(address user) private view returns (uint256) {
-    (
-      uint256 totalDscMinted,
-      uint256 collateralValueInUsd
-    ) = _getAccountInformation(user);
-
-    uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
-      LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
-
-    return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
-  }
-
-  function _getAccountInformation(
-    address user
-  )
-    private
-    view
-    returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
-  {
-    totalDscMinted = s_DSCMinted[user];
-    collateralValueInUsd = getAccountCollateralValue(user);
-  }
-
-  function _revertIfHealthFactorIsBroken(address user) internal view {
-    uint256 userHealthFactor = _healthFactor(user);
-    if (userHealthFactor < MIN_HEALTH_FACTOR) {
-      revert DSCEngine__BreaksHealthFactor(userHealthFactor);
-    }
-  }
-
-  //////////////////////////////////////////
-  //   Public & External View Functions   //
-  //////////////////////////////////////////
-
-  function getAccountCollateralValue(
-    address user
-  ) public view returns (uint256 totalCollateralValueInUsd) {
-    for (uint256 i = 0; i < s_collateralTokens.length; i++) {
-      address token = s_collateralTokens[i];
-      uint256 amount = s_collateralDeposited[user][token];
-      totalCollateralValueInUsd += getUsdValue(token, amount);
-    }
-    return totalCollateralValueInUsd;
-  }
-
-  function getUsdValue(
-    address token,
-    uint256 amount
-  ) public view returns (uint256) {
-    AggregatorV3Interface priceFeed = AggregatorV3Interface(
-      s_priceFeeds[token]
-    );
-    (, int256 price, , , ) = priceFeed.latestRoundData();
-
-    return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
-  }
-
-  /*
-   * @param tokenCollateralAddress: the address of the token to deposit as collateral
-   * @param amountCollateral: The amount of collateral to deposit
-   * @param amountDscToMint: The amount of DecentralizedStableCoin to mint
-   * @notice: This function will deposit your collateral and mint DSC in one transaction
-   */
-  function depositCollateralAndMintDsc(
-    address tokenCollateralAddress,
-    uint256 amountCollateral,
-    uint256 amountDscToMint
-  ) {
-    depositCollateral(tokenCollateralAddress, amountCollateral);
-    mintDsc(amountDscToMint);
-  }
-
-  function getTokenAmountFromUsd(
-    address token,
-    uint256 usdAmountInWei
-  ) public view returns (uint256) {
-    AggregatorV3Interface priceFeed = AggregatorV3Interface(
-      s_priceFeeds[token]
-    );
-    (, int256 price, , , ) = priceFeed.latestRoundData();
-
-    return
-      (usdAmountInWei * PRECISION) /
-      (uint256(price) * ADDITIONAL_FEED_PRECISION);
-  }
-
-  function getHealthFactor() external view {}
-}
-```
-
-## Liquidation/Refactoring
-
-In the last lesson we left off with our `liquidate` function still needing to redeem the unhealthy position's collateral, and burn the `liquidator`'s `DSC`. If we look at the `redeemCollateral` function, we can see why achieving our goal won't be as simple as calling `redeemCollateral` and `burnDsc`.
-
-```solidity
-function redeemCollateral(
-  address tokenCollateralAddress,
-  uint256 amountCollateral
-) public moreThanZero(amountCollateral) nonReentrant {
-  s_collateralDeposited[msg.sender][tokenCollateralAddress] -= amountCollateral;
-  emit CollateralRedeemed(msg.sender, tokenCollateralAddress, amountCollateral);
-
-  bool success = IERC20(tokenCollateralAddress).transfer(
-    msg.sender,
-    amountCollateral
-  );
-  if (!success) {
-    revert DSCEngine__TransferFailed();
-  }
-
-  _revertIfHealthFactorIsBroken(msg.sender);
-}
-```
-
-Currently this function has `msg.sender` hardcoded as the user for which collateral is redeemed _and_ sent to. This isn't the case when someone is being `liquidated`, the `msg.sender` is a third party. So, how do we adjust things to account for this?
-
-What we'll do is refactor the contract to include an _internal_ `_redeemCollateral` function which is only callable by permissioned methods within the protocol. This will allow our liquidate function to redeem the collateral of an arbitrary user when appropriate conditions are met.
-
-We'll add this new internal function under our `Private & Internal View Functions` header.
-
-```solidity
-///////////////////////////////////////////
-//   Private & Internal View Functions   //
-///////////////////////////////////////////
-
-function _redeemCollateral(
-  address tokenCollateralAddress,
-  uint256 amountCollateral,
-  address from,
-  address to
-) {
-  s_collateralDeposited[from][tokenCollateralAddress] -= amountCollateral;
-  emit CollateralRedeemed(msg.sender, tokenCollateralAddress, amountCollateral);
-
-  bool success = IERC20(tokenCollateralAddress).transfer(to, amountCollateral);
-  if (!success) {
-    revert DSCEngine__TransferFailed();
+contract SmallSol {
+  // Invariant: Must never revert.
+  function f(uint256 a) public returns (uint256) {
+    a = a + 1;
+    return a;
   }
 }
 ```
 
-The above internal version of `redeemCollateral` contains the same logic as our public one currently, but we've changed the collateral balance change and transfer to reflect the `from` and `to` addresses respectively.
+In the above simple contract example, the obvious path is returning the `result of a + 1`. Another less obvious path would be this function `f` reverting due to overflow. Symbolic Execution, through it's mathetmatical modelling, would traverse all possible paths, looking for criteria that break our invariant. These paths might be represented something like this:
 
-At this point let's adjust our `CollateralRedeemed` event. We're going to adjust the emission and the declaration of the event to handle this new from/to structure. We'll adjust this in our public `redeemCollateral` function soon.
+**Path 1:** `assert(a not 2**256 - 1); a:= a+1; return a;`
 
-```solidity
-////////////////
-//   Events   //
-////////////////
+**Path 2:** `assert(a := 2**256); revert;`
 
-event CollateralDeposited(address indexed user, address indexed token, uint256 indexed amount);
-event CollateralRedeemed(address indexed redeemedFrom, address indexed redeemedTo, address indexed token, uint256 amount);
+In the first path, a is anything less than uint256.max. In the second path, it's equal to the max and reverts.
 
-...
+Both of these situations can't simultaneously be true, so the formal verification solver would take the SMT-LIB code and determine which paths it's able to "satisfy". If path 2 can be satisfied, this represents a breaking of the protocol invariant/property.
 
-function _redeemCollateral(address tokenCollateralAddress, uint256 amountCollateral, address from, address to){
+> ❗ **NOTE**
+> Formal verification tools use a special language to process the mathematical models of code called SMT_LIB.
 
-    ...
+Some formal verification tools available include things like Manitcore, Halmos and Certora, but even the Solidity Compiler can do many of these steps behind the scenes:
 
-    emit CollateralRedeemed(from, to, tokenCollateralAddress, amountCollateral);
+1. Explore Paths
+2. Convert Paths to a set of Boolean expressions
+3. Determine if paths are reachable
 
-    ...
-}
-```
+You can read more about the Solidity Compiler SMTChecker **[here](https://docs.soliditylang.org/en/v0.8.26/smtchecker.html)**.
 
-Now, back in our public `redeemCollateral` function, we can simply call this internal version and hardcode the appropriate `msg.sender` values.
+### Limitations of Formal Verification
 
-```solidity
-function redeemCollateral(
-  address tokenCollateralAddress,
-  uint256 amountCollateral
-) public moreThanZero(amountCollateral) nonReentrant {
-  _redeemCollateral(
-    msg.sender,
-    msg.sender,
-    tokenCollateralAddress,
-    amountCollateral
-  );
-  _revertIfHealthFactorIsBroken(msg.sender);
-}
-```
-
-### Back to Liquidate
-
-Now that we've written this internal `_redeemCollateral` function, we can leverage this within our `liquidate` function.
-
-```solidity
-function liquidate(
-  address collateral,
-  address user,
-  uint256 debtToCover
-) external moreThanZero(debtToCover) nonReentrant {
-  uint256 startingUserHealthFactor = _healthFactor(user);
-  if (startingUserHealthFactor > MIN_HEALTH_FACTOR) {
-    revert DSCEngine__HealthFactorOk();
-  }
-  uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(
-    collateral,
-    debtToCover
-  );
-
-  uint256 bonusCollateral = (tokeAmountFromDebtCovered * LIQUIDATION_BONUS) /
-    LIQUIDATION_PRECISION;
-
-  uint256 totalCollateralRedeemed = tokenAmountFromDebtCovered +
-    bonusCollateral;
-
-  _redeemCollateral(user, msg.sender, collateral, totalCollateralToRedeem);
-}
-```
-
-With the refactoring we've just done, we can be sure that the `liquidator` will be awarded the collateral (after some testing of course). We're going to need to do the same thing with our `burnDsc` function, which is currently public and hardcoded with `msg.sender` as well.
-
-```solidity
-function burnDsc(uint256 amount) public moreThanZero(amount){
-    _burnDsc(amount, msg.sender, msg.sender)
-    _revertIfHealthFactorIsBroken(msg.sender);
-}
-
-...
-
-function _burnDsc(uint256 amountDscToBurn, address onBehalfOf, address dscFrom) private moreThanZero(amount){
-    s_DSCMinted[onBehalfOf] -= amount;
-    bool success = i_dsc.transferFrom(dscFrom, address(this), amount);
-    if(!success){
-        revert DSCEngine__TransferFailed();
-    }
-    i_dsc.burn(amount);
-}
-```
-
-And, just like before, we can go back to our `liquidate` function and leverage this internal `_burnDsc`.
-
-```solidity
-function liquidate(
-  address collateral,
-  address user,
-  uint256 debtToCover
-) external moreThanZero(debtToCover) nonReentrant {
-  uint256 startingUserHealthFactor = _healthFactor(user);
-  if (startingUserHealthFactor > MIN_HEALTH_FACTOR) {
-    revert DSCEngine__HealthFactorOk();
-  }
-  uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(
-    collateral,
-    debtToCover
-  );
-
-  uint256 bonusCollateral = (tokeAmountFromDebtCovered * LIQUIDATION_BONUS) /
-    LIQUIDATION_PRECISION;
-
-  uint256 totalCollateralRedeemed = tokenAmountFromDebtCovered +
-    bonusCollateral;
-
-  _redeemCollateral(user, msg.sender, collateral, totalCollateralToRedeem);
-
-  _burnDsc(debtToCover, user, msg.sender);
-}
-```
-
-Importantly, we're calling these low level internal calls, so we've going to want to check some `Health Factors` here. If the `liquidation` somehow doesn't result in the user's `Health Factor` improving, we should revert. This will come with a new custom error.
-
-```solidity
-uint256 endingUserHealthFactor = _healthFactor(user);
-if(endingUserHealthFactor <= startingUserHealthFactor){
-    revert DSCEngine__HealthFactorNotImproved();
-}
-```
-
-Be sure to declare the custom error where appropriate.
-
-```solidity
-///////////////////
-//     Errors    //
-///////////////////
-
-...
-
-error DSCEngine__HealthFactorNotImproved();
-```
-
-The last thing we'll want to do is also ensure that our `liquidator`'s `Health Factor` hasn't been broken. Our final `liquidate` function should look like this:
-
-```solidity
-function liquidate(
-  address collateral,
-  address user,
-  uint256 debtToCover
-) external moreThanZero(debtToCover) nonReentrant {
-  uint256 startingUserHealthFactor = _healthFactor(user);
-  if (startingUserHealthFactor > MIN_HEALTH_FACTOR) {
-    revert DSCEngine__HealthFactorOk();
-  }
-  uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(
-    collateral,
-    debtToCover
-  );
-
-  uint256 bonusCollateral = (tokeAmountFromDebtCovered * LIQUIDATION_BONUS) /
-    LIQUIDATION_PRECISION;
-
-  uint256 totalCollateralRedeemed = tokenAmountFromDebtCovered +
-    bonusCollateral;
-
-  _redeemCollateral(user, msg.sender, collateral, totalCollateralToRedeem);
-
-  _burnDsc(debtToCover, user, msg.sender);
-
-  uint256 endingUserHealthFactor = _healthFactor(user);
-  if (endingUserHealthFactor <= startingUserHealthFactor) {
-    revert DSCEngine__HealthFactorNotImproved();
-  }
-
-  _revertIfHealthFactorIsBroken(msg.sender);
-}
-```
+Now, Formal Verification isn't a silver bullet, it does have its limitations. One of the most common of which is known as the **path explosion problem**. In essence, when a solver is presented with code that is non-deterministic or contains infinite looping, the number of possible paths approaches infinity. When this happens, a solver is unable to resolve a valid proof due to the time and computation necessary to solve.
 
 ### Wrap Up
 
-Run `forge build` at this point, make sure things are compiling, but if so...
+At the end of the day, each testing methodology brings advantages and disadvantages. From my point of view, a thorough fuzz testing suite should be the _bare minimum_ standard in Web3 protocol security in 2024.
 
-WOOOOOOOOO! We're (more or less) done with our `DSCEngine` contract. Let's recap a bit of what we've accomplished here and what our contract is capable of.
+It's important to employ a robust and diverse set of testing tools to assure the greatest security coverage of a protocol.
 
-Our code is starting to look very professional. We have NATSPEC documentation throughout. `DSCEngine` is able to `mintDsc`, `burnDsc`, `depositCollateral`, `redeemCollateral`, `liquidate` unhealthy positions, and assess the `Health Factor` of users.
+The Trail of Bits team offers an amazing resource on building secure contracts on secure-contracts.com that is worth a read for everyone getting serious about smart contract security.
 
-Users are able to mint as much `DSC` as their collateral and subsequently `Health Factor` will support. Currently a user must have `200%` collateralization of their `DSC` position.
+> ❗ **IMPORTANT**
+> Even all this isn't a guarantee that your code is bug free.
 
-We've ensured that `liquidators` are incentivized to secure the value of our stablecoin by closing unhealthy positions and receiving collateral rewards in turn. It's through this mechanism that the `DecentralizedStableCoin` protocol will never be `under-collateralized`.
-
-Now's a great time to take a break. You've earned it.
-
-When you come back to the next lesson, we'll be diving deep into more advanced testing methodologies as we validate our code.
-
-See you there!
+Hopefully this has shed some light on the layers of smart contract testing and the importance of a thorough test suite and using the tools available to us. See you in the next lesson where we apply some of this to create a fuzzing test suite for DecentralizedStableCoin!
