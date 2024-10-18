@@ -1,85 +1,125 @@
-# Create the price feed handler
+# Manage your oracles connections
 
-## Handler - Price Feed
+## OracleLib
 
-Our handler looks great at this point, but it doesn't reflect everything. Another powerful feature of this methodology is that we're able to leverage our handler to guide not only our target contract, but any contract we want!
+There are a few assumptions that the `DecentralizedStableCoin` protocol is making that may lead to unexpected vulnerabilities. One of which is our use of an oracle for price feeds.
 
-Take price feeds for example. These are external references that our protcol depends upon to function properly. We can use our handler to more realistically emulate how price feeds would behave in real-world scenarios.
+Much of our protocol relies on `Chainlink price feeds` for accurate value calculations. While a very dependable service, we would still want to protect against the impact of issues that could arise from the reliance on this system. We're going to do this by writing our own `library`!
 
-Our project should already contain a MockV3Aggregator within the mocks folder, so let's begin by importing it into Handler.t.sol. This file mimics the behaviour of a price feed.
+Create the file `src/libraries/OracleLib.sol`.
+
+Taking a look at the **[Chainlink price feeds](https://docs.chain.link/data-feeds/price-feeds/addresses)** available, we can see that each of these feeds as a configured `heartbeat`. The `heartbeat` of a price feed represents the maximum amount of time that can pass before the feed is meant to update, otherwise the price is said to be come `stale`.
+
+In our `OracleLib`, let's write some checks to ensure the prices `DSCEngine` are using aren't `stale`. If prices being received by our protocol become stale, we hope to pause the functionality of our contract.
 
 ```solidity
-import { MockV3Aggregator } from "../mocks/MockV3Aggregator.sol";
+//SPDX-License-Identifier: MIT
+
+pragma solidity ^0.8.18;
+
+/**
+ * @title OracleLib
+ * @author Patrick Collins
+ * @notice This library is used to check the Chainlink Oracle for stale data.
+ * If a price is stale, functions will revert, and render the DSCEngine unusable - this is by design.
+ * We want the DSCEngine to freeze if prices become stale.
+ *
+ * So if the Chainlink network explodes and you have a lot of money locked in the protocol... too bad.
+ */
+library OracleLib {
+    function staleCheckLatestRoundData() public view returns () {}
 ```
 
-Then, we can declare a state variable, and in our constructor, we can employ another getter function to acquire the price feed for that token.
+With our _beautiful_ `NATSPEC` in place detailing the `library` and its purposes, our main function here is going to be `stalePriceCheck`. Since we'll be checking `Chainlink's price feeds`, we know we'll need the `AggregatorV3Interface`, lets be sure to import that. The return types of our function are going to be those of the `latestRoundData` function within `AggregatorV3Interface`. Let's start by getting those values.
 
 ```solidity
-contract Handler is Test {
-    ...
-    MockV3Aggregator public ethUsdPriceFeed;
-    ...
-    constructor(DSCEngine _dscEngine, DecentralizedStableCoin _dsc) {
-        dsce = _dscEngine;
-        dsc = _dsc;
+...
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+...
+library OracleLib {
+    function staleCheckLatestRoundData(AggregatorV3Interface pricefeed) public view returns (uint80, int256, uint256, uint256, uint80) {
+        (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) = pricefeed.latestRoundData();
+    }
+}
+```
 
-        address[] memory collateralTokens = dsce.getCollateralTokens();
-        weth = ERC20Mock(collateralTokens[0]);
-        wbtc = ERC20Mock(collateralTokens[1]);
+Now, we just need to calculate the time since the last update, and if it's over a threshold, we'll revert and return our variables. `Chainlink` sets a `heartbeat` of `3600 seconds for the ETH/USD` price feed, we'll give it even more time and set a `TIMEOUT` of `3 hours`. We can add a custom error to handle timeouts at this step as well.
 
-        ethUsdPriceFeed = MockV3Aggregator(dsce.getCollateralTokenPriceFeed(address(weth)));
+> ❗ **PROTIP** > `hours` is a keyword in solidity that is effectively `*60*60 seconds` .
+>
+> `3 hours` == `3 * 60 * 60` == `10800 seconds`.
+
+```solidity
+...
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+...
+library OracleLib {
+
+    error OracleLib__StalePrice();
+    uint256 private constant TIMEOUT = 3 hours;
+
+    function staleCheckLatestRoundData(AggregatorV3Interface pricefeed) public view returns (uint80, int256, uint256, uint256, uint80) {
+        (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) = pricefeed.latestRoundData();
+
+        uint256 secondsSince = block.timestamp - updatedAt;
+        if (secondsSince > TIMEOUT) revert OracleLib__StalePrice();
+
+        return (roundId, answer, startedAt, updatedAt, answeredInRound);
+    }
+}
+```
+
+We should now be able to use this `library` for `AggregatorV3Interfaces` to automatically check if the price being supplied is stale.
+
+In `DSCEngine.sol`, we can import `OracleLib`, as our using statement under a new types header, and then replace all our calls to `latestRoundData` with `staleCheckLatestRoundData`.
+
+```solidity
+...
+import {OracleLib} from "./libraries/OracleLib.sol";
+...
+
+contract DSCEngine is Reentrancy Guard {
+
+    ///////////
+    // Types //
+    ///////////
+
+    using OracleLib for AggregatorV3Interface;
+
+    function _getUsdValue(address token, uint256 amount) private view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
+        // 1 ETH = 1000 USD
+        // The returned value from Chainlink will be 1000 * 1e8
+        // Most USD pairs have 8 decimals, so we will just pretend they all do
+        // We want to have everything in terms of WEI, so we add 10 zeros at the end
+        return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
     }
     ...
+    function getTokenAmountFromUsd(address token, uint256 usdAmountInWei) public view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
+        // $100e18 USD Debt
+        // 1 ETH = 2000 USD
+        // The returned value from Chainlink will be 2000 * 1e8
+        // Most USD pairs have 8 decimals, so we will just pretend they all do
+        return ((usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION));
+    }
 }
 ```
-
-With this price feed, we can not write a new function which, when called, will update the collateral price, making the calls to our protocol much more dynamic.
-
-```solidity
-function updateCollateralPrice(uint96 newPrice) public {
-  int256 newPriceInt = int256(uint256(newPrice));
-  ethUsdPriceFeed.updateAnswer(newPriceInt);
-}
-```
-
-With this new function, our test runs will intermittently change the price of our weth collateral as functions are randomly called. Let's run it!
-
-```bash
-forge test --mt invariant_ProtocolTotalSupplyLessThanCollateralValue -vvvv
-```
-
-![defi handler price feed](./assets/defi-handler-price-feed1.png)
-
-Our assertion is breaking! If we look more closely at the trace of executions we can obtain a clearer understanding of what actually happened:
-
-![defi handler price feed](./assets/defi-handler-price-feed2.png)
-
-When updateCollateralPrice was called, the price was updated to a number so low as to break our invariant! The minted DSC was not longer collateralized by the weth which had been deposited.
-
-This is legitimately a concerning vulnerability of this protocol. Effectively, if the USD value of our deposited collateral tanks too quickly, the protocol will become under-collateralized.
-
-Because we've declared our thresholds as a LIQUIDATION_THRESHOLD of 50 and a LIQUIDATION_BONUS of 10, we're defining our protocol's safe operational parameters as being between 200% and 110% over-collateralization. Too rapid a change in the value of our collateral jeopardizes this range.
 
 ### Wrap Up
 
-So, we've uncovered a potentially critical vulnerability in this protocol. Either we would go back and adjust the code to account for this, or a developer would accept this as a known bug in hopes that prices are more stable than what our tests imply.
+We've done a tonne of refactoring, and we're very nearly done. We should run `forge test` just to ensure everything is working as expected!
 
-These are the types of scenarios that invariant tests are incredible at spotting.
+![defi oracle lib](./assets/defi-oracle-lib1.png)
 
-For now, I'm going to comment out our updateCollateralPrice function. So that it won't affect our future tests.
+Beautiful.
 
-```solidity
-// THIS BREAKS OUR INVARIANT TEST SUITE!!!
-// function updateCollateralPrice(uint96 newPrice) public {
-//     int256 newPriceInt = int256(uint256(newPrice));
-//     ethUsdPriceFeed.updateAnswer(newPriceInt);
-// }
-```
+1. Proper oracle use ✅
+2. Writing more tests ❌
+3. Smart Contract Audit Preparation 🔜
 
-We're almost done with this section! There are 3 more things we should cover:
+I'll be transparent, we aren't going to write additional tests together. This is something I encourage you to do, this is a great way to challenge yourself to improve. Use `forge coverage` as your guide and write additional tests, especially for our new `OracleLib`.
 
-1. Proper oracle use
-2. Writing more tests
-3. Smart Contract Audit Preparation
-
-The finish line is close, let's keep going!
+In the next lesson we'll look at what's needed to prepare a protocol for a smart contract audit!
