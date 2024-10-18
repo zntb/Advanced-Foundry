@@ -1,176 +1,85 @@
-# Debugging the fuzz tests handler
+# Create the price feed handler
 
-## Fuzz Test Debugging
+## Handler - Price Feed
 
-In the last lesson, we left off with a small issue in our tests. For some reason our totalSupply was never increasing, which implies that our new mintDsc function is never being called.
+Our handler looks great at this point, but it doesn't reflect everything. Another powerful feature of this methodology is that we're able to leverage our handler to guide not only our target contract, but any contract we want!
 
-Let's start by debugging this issue. One way we attempt to figure out what's happening is through the use of **[Ghost Variables](https://book.getfoundry.sh/forge/invariant-testing?highlight=ghost%20v#handler-ghost-variables)**.
+Take price feeds for example. These are external references that our protcol depends upon to function properly. We can use our handler to more realistically emulate how price feeds would behave in real-world scenarios.
 
-Ghost variables are declared in our handler and essentially function like state variables for our tests. Something we can do then, is declare `timesMintIsCalled` and have this increment within our mintDsc function.
+Our project should already contain a MockV3Aggregator within the mocks folder, so let's begin by importing it into Handler.t.sol. This file mimics the behaviour of a price feed.
+
+```solidity
+import { MockV3Aggregator } from "../mocks/MockV3Aggregator.sol";
+```
+
+Then, we can declare a state variable, and in our constructor, we can employ another getter function to acquire the price feed for that token.
 
 ```solidity
 contract Handler is Test {
     ...
-    uint256 timesMintCalled;
+    MockV3Aggregator public ethUsdPriceFeed;
     ...
-    function mintDsc(uint256 amount) public {
-        (uint256 totalDscMinted, uint256 collateralValueInUsd) = engine.getAccountInformation(msg.sender);
+    constructor(DSCEngine _dscEngine, DecentralizedStableCoin _dsc) {
+        dsce = _dscEngine;
+        dsc = _dsc;
 
-        uint256 maxDscToMint = (collateralValueInUsd / 2) - totalDscMinted;
-        if (maxDscToMint < 0) {
-            return;
-        }
+        address[] memory collateralTokens = dsce.getCollateralTokens();
+        weth = ERC20Mock(collateralTokens[0]);
+        wbtc = ERC20Mock(collateralTokens[1]);
 
-        amount = bound(amount, 0, maxDscToMint);
-        if (amount <= 0) {
-            return;
-        }
-
-        vm.startPrank(msg.sender);
-        engine.mintDsc(amount);
-        vm.stopPrank();
-
-        timesMintIsCalled++;
+        ethUsdPriceFeed = MockV3Aggregator(dsce.getCollateralTokenPriceFeed(address(weth)));
     }
+    ...
 }
 ```
 
-With our ghost variable in place, we can now access this in our invariant test and console it out to glean some insight.
+With this price feed, we can not write a new function which, when called, will update the collateral price, making the calls to our protocol much more dynamic.
 
 ```solidity
-function invariant_ProtocolTotalSupplyLessThanCollateralValue()
-  external
-  view
-  returns (bool)
-{
-  uint256 totalSupply = dsc.totalSupply();
-  uint256 totalWethDeposited = IERC20(weth).balanceOf(address(dsce));
-  uint256 totalWbtcDeposited = IERC20(wbtc).balanceOf(address(dsce));
-
-  uint256 wethValue = dsce.getUsdValue(weth, totalWethDeposited);
-  uint256 wbtcValue = dsce.getUsdValue(wbtc, totalWbtcDeposited);
-
-  console.log("totalSupply: ", totalSupply);
-  console.log("wethValue: ", wethValue);
-  console.log("wbtcValue: ", wbtcValue);
-  console.log("Times Mint Called: ", handler.timesMintCalled());
-
-  assert(totalSupply <= wethValue + wbtcValue);
+function updateCollateralPrice(uint96 newPrice) public {
+  int256 newPriceInt = int256(uint256(newPrice));
+  ethUsdPriceFeed.updateAnswer(newPriceInt);
 }
 ```
 
-Run it!
-
-![defi fuzz debugging](./assets/defi-fuzz-debugging1.png)
-
-Well, at least we've confirmed that mintDsc isn't being called. It's _likely_ because one of our conditionals in our function are catching. What I would suggest is moving our Ghost Variable up this function to determine why things revert.
-
-Before moving on, I challenge you to determine what the bug here is. Work through the mintDsc function and challenge yourself!
-
-PSYCHE! Don't cheat. Try to find the bug!
-
-Alright, my approach to finding this bug was by using the ghost variable described above, when I determined which line the mintDsc function was reverting on, I console logged the associated variables in that area of the function.
-
-One of the variables I ended up checking was `msg.sender`.
-
-When our fuzzer is running, it's going to make random function calls, but it also calls those function with random addresses. What's happening in our test is that the address that was minting DSC was always different from the addresses which had deposited collateral!
-
-In order to mitigate this issue, we'll need to track the address which deposit collateral, and then have the address calling mintDsc derived from those tracked addresses. Let's declare an address array to which addresses that have deposited collateral can be added.
-
-```solidity
-contract Handler is Test {
-    ...
-    uint256 timesMintIsCalled;
-    address[] usersWithCollateralDeposited;
-    ...
-    function depositCollateral(uint256 collateralSeed, uint256 amountCollateral) public {
-        amountCollateral = bound(amountCollateral, 1, MAX_DEPOSIT_SIZE);
-        ERC20Mock collateral = _getCollateralFromSeed(collateralSeed);
-
-        vm.startPrank(msg.sender);
-        collateral.mint(msg.sender, amountCollateral);
-        collateral.approve(address(dsce), amountCollateral);
-        dsce.depositCollateral(address(collateral), amountCollateral);
-        vm.stopPrank();
-
-        usersWithCollateral.push(msg.sender);
-    }
-}
-```
-
-This new array of addresses with collateral can now be used as a seed within our mintDsc function, much like the collateralSeed in depositCollateral.
-
-```solidity
-function mintDsc(uint256 amount, uint256 addressSeed) public {
-    address sender = usersWithCollateralDeposited[addressSeed % usersWithCollateralDeposited.length]
-    (uint256 totalDscMinted, uint256 collateralValueInUsd) = engine.getAccountInformation(sender);
-
-    uint256 maxDscToMint = (collateralValueInUsd / 2) - totalDscMinted;
-    if (maxDscToMint < 0) {
-        return;
-    }
-
-    amount = bound(amount, 0, maxDscToMint);
-    if (amount <= 0) {
-        return;
-    }
-
-    vm.startPrank(sender);
-    engine.mintDsc(amount);
-    vm.stopPrank();
-
-    timesMintIsCalled++;
-}
-```
-
-Let's give our tests a shot now.
+With this new function, our test runs will intermittently change the price of our weth collateral as functions are randomly called. Let's run it!
 
 ```bash
 forge test --mt invariant_ProtocolTotalSupplyLessThanCollateralValue -vvvv
 ```
 
-![defi handler](./assets/defi-fuzz-debugging2.png)
+![defi handler price feed](./assets/defi-handler-price-feed1.png)
 
-A new error! New errors mean progress. It seems as though our mintDsc function is causing a `division or modulo by 0`. Ah, this is because our new array of usersWithCollateralDeposited may be empty. Let's account for this with a conditional.
+Our assertion is breaking! If we look more closely at the trace of executions we can obtain a clearer understanding of what actually happened:
 
-```solidity
-function mintDsc(uint256 amount, uint256 addressSeed) public {
+![defi handler price feed](./assets/defi-handler-price-feed2.png)
 
-    if(usersWithCollateralDeposited.length == 0){
-        return;
-    }
+When updateCollateralPrice was called, the price was updated to a number so low as to break our invariant! The minted DSC was not longer collateralized by the weth which had been deposited.
 
-    address sender = usersWithCollateralDeposited[addressSeed % usersWithCollateralDeposited.length]
-    (uint256 totalDscMinted, uint256 collateralValueInUsd) = engine.getAccountInformation(sender);
+This is legitimately a concerning vulnerability of this protocol. Effectively, if the USD value of our deposited collateral tanks too quickly, the protocol will become under-collateralized.
 
-    uint256 maxDscToMint = (collateralValueInUsd / 2) - totalDscMinted;
-    if (maxDscToMint < 0) {
-        return;
-    }
-
-    amount = bound(amount, 0, maxDscToMint);
-    if (amount <= 0) {
-        return;
-    }
-
-    vm.startPrank(sender);
-    engine.mintDsc(amount);
-    vm.stopPrank();
-
-    timesMintIsCalled++;
-}
-```
-
-Once more with feeling.
-
-![defi handler](./assets/defi-fuzz-debugging3.png)
+Because we've declared our thresholds as a LIQUIDATION_THRESHOLD of 50 and a LIQUIDATION_BONUS of 10, we're defining our protocol's safe operational parameters as being between 200% and 110% over-collateralization. Too rapid a change in the value of our collateral jeopardizes this range.
 
 ### Wrap Up
 
-This is amazing! Our test is passing, we have totalSupply being reported _and_ we can see that our mintDsc function is now being called. Our handler is getting closer and closer to containing all of the functions we would want to test.
+So, we've uncovered a potentially critical vulnerability in this protocol. Either we would go back and adjust the code to account for this, or a developer would accept this as a known bug in hopes that prices are more stable than what our tests imply.
 
-Another challenge I pose to you is to write your own invariant test within `Invariants.t.sol` to check our `getter functions`. This test should be an easy one, simply call all the `getter functions` and ensure things don't revert!
+These are the types of scenarios that invariant tests are incredible at spotting.
 
-In the next lesson, we'll investigate how the handler can be used to manage the behaviour of some of our other dependencies, not just DSCEngine.sol!
+For now, I'm going to comment out our updateCollateralPrice function. So that it won't affect our future tests.
 
-See you soon!
+```solidity
+// THIS BREAKS OUR INVARIANT TEST SUITE!!!
+// function updateCollateralPrice(uint96 newPrice) public {
+//     int256 newPriceInt = int256(uint256(newPrice));
+//     ethUsdPriceFeed.updateAnswer(newPriceInt);
+// }
+```
+
+We're almost done with this section! There are 3 more things we should cover:
+
+1. Proper oracle use
+2. Writing more tests
+3. Smart Contract Audit Preparation
+
+The finish line is close, let's keep going!
