@@ -1,75 +1,176 @@
-# Create the mint handler
+# Debugging the fuzz tests handler
 
-## Handler - mintDsc
+## Fuzz Test Debugging
 
-In the last lesson our stateful fuzz tests were looking great, _but_ the validity of our tests was a little questionable because we haven't configured a way to mint any DSC during our tests. Because our totalSupply was always zero, changes to our collateral value were never going to violate our invariant.
+In the last lesson, we left off with a small issue in our tests. For some reason our totalSupply was never increasing, which implies that our new mintDsc function is never being called.
 
-Let's change that now by writing a mintDsc function for our Handler.
+Let's start by debugging this issue. One way we attempt to figure out what's happening is through the use of **[Ghost Variables](https://book.getfoundry.sh/forge/invariant-testing?highlight=ghost%20v#handler-ghost-variables)**.
 
-```solidity
-function mintDsc(uint256 amount) public {}
-```
-
-To constrain our tests, there are a couple things to consider. Namely, we know the `amount` argument needs to be greater than zero or this function will revert with `DSCEngine__NeedsMoreThanZero`. So let's account for that by binding this value.
+Ghost variables are declared in our handler and essentially function like state variables for our tests. Something we can do then, is declare `timesMintIsCalled` and have this increment within our mintDsc function.
 
 ```solidity
-function mintDsc(uint256 amount) public {
-  amount = bound(amount, 1, MAX_DEPOSIT_SIZE);
-  vm.startPrank(msg.sender);
-  dcse.mintDsc(amount);
-  vm.stopPrank();
+contract Handler is Test {
+    ...
+    uint256 timesMintCalled;
+    ...
+    function mintDsc(uint256 amount) public {
+        (uint256 totalDscMinted, uint256 collateralValueInUsd) = engine.getAccountInformation(msg.sender);
+
+        uint256 maxDscToMint = (collateralValueInUsd / 2) - totalDscMinted;
+        if (maxDscToMint < 0) {
+            return;
+        }
+
+        amount = bound(amount, 0, maxDscToMint);
+        if (amount <= 0) {
+            return;
+        }
+
+        vm.startPrank(msg.sender);
+        engine.mintDsc(amount);
+        vm.stopPrank();
+
+        timesMintIsCalled++;
+    }
 }
 ```
 
-Another consideration for this function is that it will revert if the Health Factor of the user is broken. We _could_ account for this in our function by assuring that's never the case, but this is an example of a situation you may want to avoid over-narrowing your test focus. We _want_ this function to revert if the Health Factor is broken, so in this case we'd likely just set `fail_on_revert` to `false`.
-
-Situations like this will often lead developers to split their test suite into scenarios where `fail_on_revert` is appropriately false, and scenarios where `fail_on_revert` should be true. This allows them to cover all their bases.
-
-Let's run our function and see how things look.
-
-```bash
-forge test --mt invariant_ProtocolTotalSupplyLessThanCollateralValue
-```
-
-![defi handler](./assets/defi-handler-mint-dsc1.png)
-
-> ❗ **NOTE**
-> The `totalSupply = 0` here because of a mistake we made, we'll fix it soon!
-
-Ok, so things work when we have `fail_on_revert` set to `false`. We want our tests to be quite focused, so moving forward we'll leave `fail_on_revert` to `true`. What happens when we run it now?
-
-![defi handler](./assets/defi-handler-mint-dsc2.png)
-
-As expected, our user's Health Factor is breaking. This is because we haven't considered _who_ is minting our DSC with respect to who has deposited collateral. We can account for this in our test by ensuring that the user doesn't attempt to mint more than the collateral they have deposited, otherwise we'll return out of the function. We'll determine the user's amount to mint by calling our `getAccountInformation` function.
+With our ghost variable in place, we can now access this in our invariant test and console it out to glean some insight.
 
 ```solidity
-function mintDsc(uint256 amount) public {
-    (uint256 totalDscMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(msg.sender);
+function invariant_ProtocolTotalSupplyLessThanCollateralValue()
+  external
+  view
+  returns (bool)
+{
+  uint256 totalSupply = dsc.totalSupply();
+  uint256 totalWethDeposited = IERC20(weth).balanceOf(address(dsce));
+  uint256 totalWbtcDeposited = IERC20(wbtc).balanceOf(address(dsce));
 
-    uint256 maxDscToMint = (collateralValueInUsd / 2) - totalDscMinted
-    if(maxDscToMint < 0){
+  uint256 wethValue = dsce.getUsdValue(weth, totalWethDeposited);
+  uint256 wbtcValue = dsce.getUsdValue(wbtc, totalWbtcDeposited);
+
+  console.log("totalSupply: ", totalSupply);
+  console.log("wethValue: ", wethValue);
+  console.log("wbtcValue: ", wbtcValue);
+  console.log("Times Mint Called: ", handler.timesMintCalled());
+
+  assert(totalSupply <= wethValue + wbtcValue);
+}
+```
+
+Run it!
+
+![defi fuzz debugging](./assets/defi-fuzz-debugging1.png)
+
+Well, at least we've confirmed that mintDsc isn't being called. It's _likely_ because one of our conditionals in our function are catching. What I would suggest is moving our Ghost Variable up this function to determine why things revert.
+
+Before moving on, I challenge you to determine what the bug here is. Work through the mintDsc function and challenge yourself!
+
+PSYCHE! Don't cheat. Try to find the bug!
+
+Alright, my approach to finding this bug was by using the ghost variable described above, when I determined which line the mintDsc function was reverting on, I console logged the associated variables in that area of the function.
+
+One of the variables I ended up checking was `msg.sender`.
+
+When our fuzzer is running, it's going to make random function calls, but it also calls those function with random addresses. What's happening in our test is that the address that was minting DSC was always different from the addresses which had deposited collateral!
+
+In order to mitigate this issue, we'll need to track the address which deposit collateral, and then have the address calling mintDsc derived from those tracked addresses. Let's declare an address array to which addresses that have deposited collateral can be added.
+
+```solidity
+contract Handler is Test {
+    ...
+    uint256 timesMintIsCalled;
+    address[] usersWithCollateralDeposited;
+    ...
+    function depositCollateral(uint256 collateralSeed, uint256 amountCollateral) public {
+        amountCollateral = bound(amountCollateral, 1, MAX_DEPOSIT_SIZE);
+        ERC20Mock collateral = _getCollateralFromSeed(collateralSeed);
+
+        vm.startPrank(msg.sender);
+        collateral.mint(msg.sender, amountCollateral);
+        collateral.approve(address(dsce), amountCollateral);
+        dsce.depositCollateral(address(collateral), amountCollateral);
+        vm.stopPrank();
+
+        usersWithCollateral.push(msg.sender);
+    }
+}
+```
+
+This new array of addresses with collateral can now be used as a seed within our mintDsc function, much like the collateralSeed in depositCollateral.
+
+```solidity
+function mintDsc(uint256 amount, uint256 addressSeed) public {
+    address sender = usersWithCollateralDeposited[addressSeed % usersWithCollateralDeposited.length]
+    (uint256 totalDscMinted, uint256 collateralValueInUsd) = engine.getAccountInformation(sender);
+
+    uint256 maxDscToMint = (collateralValueInUsd / 2) - totalDscMinted;
+    if (maxDscToMint < 0) {
         return;
     }
 
     amount = bound(amount, 0, maxDscToMint);
-    if(amount < 0){
+    if (amount <= 0) {
         return;
     }
 
-    vm.startPrank(msg.sender);
-    dcse.mintDsc(amount);
+    vm.startPrank(sender);
+    engine.mintDsc(amount);
     vm.stopPrank();
+
+    timesMintIsCalled++;
 }
 ```
 
-Let's try it!
+Let's give our tests a shot now.
 
-![defi handler](./assets/defi-handler-mint-dsc3.png)
+```bash
+forge test --mt invariant_ProtocolTotalSupplyLessThanCollateralValue -vvvv
+```
+
+![defi handler](./assets/defi-fuzz-debugging2.png)
+
+A new error! New errors mean progress. It seems as though our mintDsc function is causing a `division or modulo by 0`. Ah, this is because our new array of usersWithCollateralDeposited may be empty. Let's account for this with a conditional.
+
+```solidity
+function mintDsc(uint256 amount, uint256 addressSeed) public {
+
+    if(usersWithCollateralDeposited.length == 0){
+        return;
+    }
+
+    address sender = usersWithCollateralDeposited[addressSeed % usersWithCollateralDeposited.length]
+    (uint256 totalDscMinted, uint256 collateralValueInUsd) = engine.getAccountInformation(sender);
+
+    uint256 maxDscToMint = (collateralValueInUsd / 2) - totalDscMinted;
+    if (maxDscToMint < 0) {
+        return;
+    }
+
+    amount = bound(amount, 0, maxDscToMint);
+    if (amount <= 0) {
+        return;
+    }
+
+    vm.startPrank(sender);
+    engine.mintDsc(amount);
+    vm.stopPrank();
+
+    timesMintIsCalled++;
+}
+```
+
+Once more with feeling.
+
+![defi handler](./assets/defi-fuzz-debugging3.png)
 
 ### Wrap Up
 
-Bam, no reverts at all! Beautiful! You may notice (and I left a note above), our totalSupply seems stuck at 0.
+This is amazing! Our test is passing, we have totalSupply being reported _and_ we can see that our mintDsc function is now being called. Our handler is getting closer and closer to containing all of the functions we would want to test.
 
-Sometimes passing tests can be deceptive...
+Another challenge I pose to you is to write your own invariant test within `Invariants.t.sol` to check our `getter functions`. This test should be an easy one, simply call all the `getter functions` and ensure things don't revert!
 
-We'll look more closely as what's going on and how we can fix it at the start of our next lesson!
+In the next lesson, we'll investigate how the handler can be used to manage the behaviour of some of our other dependencies, not just DSCEngine.sol!
+
+See you soon!
