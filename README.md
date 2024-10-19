@@ -1,66 +1,58 @@
-# Setup
+# Merkle Proofs
 
-We can begin by creating a repository for our project with the command `mkdir merkle-airdrop` and navigate into it. Ensure you're on the regular version of Foundry by typing `foundryup` in your terminal. You can then run `forge init` to initialize an empty foundry project.
+## Introductioon
 
-## BagelToken
+Merkle Trees, Merkle Proofs, and Root Hashes are very important concepts in the realm of IT and blockchain technology. Invented by Ralph Merkle in 1979, a Merkle tree is a hierarchical structure where its base consists of **leaf nodes** representing data that has been hashed. The top of the tree is the **root hash**, created by hashing together pairs of adjacent nodes. This process continues up the tree, resulting in a single **root hash** that will represents all the data in the tree.
 
-The token that we are going to airdrop will be a ERC20 token. In the same directory we can make a `BagelToken.sol` contract, where we will use the OpenZeppelin libraries `ERC20` and `Ownable` to create it. For that we first need to install the dependency with the command `forge install openzeppelin/openzeppelin-contracts --no-commit`.
+![Merkle Tree](./assets/merkle-tree.png)
 
-In the `foundry.toml` file we the spcify a remapping:
+### Merkle Proofs
 
-```toml
-remappings = [ '@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/']
-```
+Merkle proofs will verify that a specific piece of data is part of a Merkle Tree and consist of the hashes of **sibling nodes** present at each level of the tree.
 
-And then we are ready to create the contract, which will contain a `constructor` and a `mint` function:
+For example, to prove that `Hash B` is part of the Merkle Tree, you would provide _Hash A_ (sibling 1) at the first level, and the _combined hash of Hash C and Hash D_ (sibling 2) at the second level as proofs.
+
+This allows the Merkle Tree **verifier** to reconstruct a root hash and compare it to the expected root hash. If they match, the original data is confirmed to be part of the Merkle tree.
+
+> 👀❗**IMPORTANT**:br
+> Secure hashing functions, such as `keccak256`, are designed to prevent hash collisions
+
+### Applications
+
+Merkle trees are used in **rollups** to verify state changes and transaction order and in **airdropping**, enabling specific addresses to claim tokens by being included as **leaf nodes** in the tree. As discussed in lesson 1, using Merkle proofs for airdrops is safer and more efficient than relying on a simple array of addresses to prove that a piece of data (e.g. an address) is part of a group.
+
+### OpenZeppelin
+
+OpenZeppelin provides a library for [MerkleProofs](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/dbb6104ce834628e473d2173bbc9d47f81a9eec3/contracts/utils/cryptography/MerkleProof.sol), and we will use it in our smart contract. Its [`verify`](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/dbb6104ce834628e473d2173bbc9d47f81a9eec3/contracts/utils/cryptography/MerkleProof.sol#L32) function takes the proof, the Merkle root, and the leaf to be verified as inputs.
 
 ```solidity
-import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-
-contract BagelToken is ERC20, Ownable {
-  constructor() ERC20("Bagel Token", "BT") Ownable(msg.sender) {
-    //the deployer is the owner of the contract
-  }
-
-  function mint(address account, uint256 amount) external onlyOwner {
-    _mint(account, amount);
-  }
+function verify(
+  bytes32[] memory proof,
+  bytes32 root,
+  bytes32 leaf
+) internal pure returns (bool) {
+  return processProof(proof, leaf) == root;
 }
 ```
 
-### MerkleAirdrop
+> 🗒️ **NOTE**:br
+> The **root** is typically stored _on-chain_, while the **proof** is generated _off-chain_.
 
-We can then create a new file named `MarkleAirdrop.sol`, where we will have a list of addresses and someone from that list who can claim ERC20 tokens.
-
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
-
-contract MerkleAirdrop is EIP712 {
-  // list of addresses that can receive tokens
-  // allow someone in the list to claim some tokens
-}
-```
-
-The contracts will be connected by passing the `BagelToken`, or any ERC20 token to the `MerkleAirdrop` constructor. Then we can add our claimer address into an array of addresses:
+The [`processProof`](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/dbb6104ce834628e473d2173bbc9d47f81a9eec3/contracts/utils/cryptography/MerkleProof.sol#L49) function iterates through the proof array, updating the computed hash by hashing it with the next proof element. This process ultimately returns a computed hash, which is compared to the expected root to verify the leaf's presence in the Merkle Tree.
 
 ```solidity
-address [] claimers;
-```
-
-Then we would need a function that checks that the claimer is in this whitelist and allow him to receive tokens.
-
-```solidity
-function claim(address account) external {
-  for (uint256 i = 0; i < claimers.length; i++) {
-    //check if the account is in the claimers array
+function processProof(
+  bytes32[] memory proof,
+  bytes32 leaf
+) internal pure returns (bytes32) {
+  bytes32 computedHash = leaf;
+  for (uint256 i = 0; i < proof.length; i++) {
+    computedHash = _hashPair(computedHash, proof[i]);
   }
+  return computedHash;
 }
 ```
 
-However, looping through an array that can grow indefinetely can lead to **performance issues** and calling this function. If there are for example, hundresds of claimers, will become cost prohibitive and will cause a Denial Of Service (DOS). Merkle trees will help solving this issue.
+### Conclusion
 
-### Merkle Trees and Proofs
-
-Merkle Trees is the data structure that allows us to manage and verify large sets of data efficiently, while Merkle Proofs can help to prove that some piece of data is contained within a group.
+Merkle proofs will help verifying that a specific piece of data is part of the Merkle tree. By providing hashes of sibling nodes at each level of the tree, a verifier can reconstruct the root hash and confirm data integrity.
