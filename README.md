@@ -1,91 +1,63 @@
-# Merkle Tree Script
+# Writing The Tests
 
-## `MerkleAirdropTest` setup
+## Introduction
 
-To access our private variables in the `MerkleAirdrop` contract, we need to add some getter functions like `getMerkleRoot` and `getAirdropToken`.
+In this lesson, we are going to build a comprehensive test for the `MerkleAirdrop::claim` function. This test will ensure that users can correctly claim their tokens from the `MerkleAirdrop` contract.
 
-We can then create a test file named `/test/MerkleAirdropTest.sol` and add some remappings in `foundy.toml`:
+### Setup
 
-```toml
-remappings = [
-    'murky/=lib/murky/',
-    '@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/',
-    'foundry-devops/=lib/foundry-devops',
-    'forge-std/=lib/forge-std/src/',
-]
-```
+We begin by deploying both the `BagelToken` and the `MerkleAirdrop` contracts in our `setup()` function. To properly set up the `MerkleAirdrop` contract, we need the hash `ROOT` variable, which can be retrieved from the output file that we generated in the previous lesson.
 
-Inside this test contract we will verify that an address can correctly claim some tokens.
+```solidity
+bytes32 ROOT = 0xaa5d581231e596618465a56aa0f5870ba6e20785fe436d5bfb82b08662ccc7c4;
 
-### Scripts
-
-In order to do so, we first need to generate the Merkle Proofs for our accounts.
-
-In the `/script` folder, we can create the files `GenerateInput.s.sol` and `MakeMerkle.s.sol` and copy their content from the official [Github repository](https://github.com/Cyfrin/foundry-merkle-airdrop-cu/tree/main/script). Then we can create a `target/input.json` and `target/output.json` files. The scripts will fill the content for these two files:
-
-1. `input.json` will contain our Merkle tree structure
-2. `output.json` will contain the leaves, the Merkle Proofs and the Root Hash that will be submitted to the test contract
-
-The input file will define the Merkle tree's data structure, and includes four addresses and their respective claim amounts:
-
-```json
-{
-  "types": ["address", "uint"],
-  "count": 4,
-  "values": {
-    "0": {
-      "0": "0x6CA6d1e2D5347Bfab1d91e883F1915560e09129D",
-      "1": "2500000000000000000"
-    },
-    "1": {
-      "0": "0xf39Fd6e51aad88F6F4c6aB8827279cffFb92266",
-      "1": "2500000000000000000"
-    },
-    "2": {
-      "0": "0c8Ca207e27a1a8224D1b602bf856479b03319e7",
-      "1": "2500000000000000000"
-    },
-    "3": {
-      "0": "0xf6dBa02C01AF48Cf926579F77C9f874Ca640D91D",
-      "1": "2500000000000000000"
-    }
-  }
+function setUp() public {
+    token = new BagelToken();
+    airdrop = new MerkleAirdrop(ROOT, token);
 }
 ```
 
-To produce these files, we'll use the [`murky`](https://github.com/cyfrin/murky/tree/5feccd1253d7da820f7cccccdedf64471025455d) library which we can install it with the command `forge install dmfxyz/murky --no-commit`.
+Additionally, we create a predictable address and private key by adding this line in our `setUp()` function:
 
-### Merkle tree
+```solidity
+(user, userPrivKey) = makeAddrAndKey("user");
+```
 
-The `GenerateInput.s.sol` file will write the claim amounts, types, and addresses inside the `input.json` file. It will loop through the addresses, concatenate strings with the addresses and amounts, and write the input file using the `writeFile` cheat code. You can generate the file by typing the command:
+We log the user address and copy it to the array of addresses in the `GenerateInput` file. This step ensures that the user address is actually included in the Merkle Tree, allowing them to rightfully claim tokens.
+
+To ensure the Merkle AirDrop contract can send tokens, it must hold enough of them. After deploying the contracts, we mint tokens to the owner and transfer the required amount to the AirDrop contract.
+
+```solidity
+token.mint(address(this), amountToSend);
+token.transfer(address(airdrop), amountToSend);
+```
+
+After this, we run the scripts again to generate the input and output files, updated with the user address. This involves executing `forge script script/GenerateInput.s.soul` to create the input file and `forge script script/MakeMerkle.s.soul` to generate the output file.
+
+### `MerkleAirdrop.t.sol`
+
+In our test, we'll first store the user's initial balance, which is equal to zero. We then use the `vm.prank` cheat code to simulate the user calling the `claim` function on the `MerkleAirdrop` contract. The claim function requires the user address, the amount to claim, and the proof values as parameters, which can be copied from the output file we just generated. We then verify the ending balance of the user, ensuring it's equal to the claimed amount.
+
+```solidity
+ bytes32 proofOne = 0x0fd7c981d39bece61f7499702bf59b3114a90e66b51ba2c53abdf7b62986c00a;
+    bytes32 proofTwo = 0xe5ebd1e1b5a5478a944ecab36a9a954ac3b6b8216875f6524caa7a1d87096576;
+    bytes32[] proof = [proofOne, proofTwo];
+
+//..
+function testUsersCanClaim() public {
+        uint256 startingBalance = token.balanceOf(user);
+        vm.prank(user);
+        airdrop.claim(user, amountToCollect, proof);
+        uint256 endingBalance = token.balanceOf(user);
+        console.log("Ending balance: %d", endingBalance);
+        assertEq(endingBalance - startingBalance, amountToCollect);
+    }
+```
+
+Finally, we run the test with the command
 
 ```bash
-forge script script/GenerateInput.s.sol:GenerateInput
+forge test --mt testUsersCanClaim -vvv
 ```
 
-> 🗒️ **NOTE**:br
-> To avoid the following error:
-
-```bash
-script failed: the path script/target/input.json is not allowed to be accessed for write operations
-```
-
-we need to update the `foundry.toml` file permissions
-
-```toml
-fs_permissions = [{ access = "read-write", path = "./" }]
-```
-
-### Merkle Proof
-
-After generating the Merkle Tree, we can run the `MakeMerkle.s.sol` script to produce the `output.json` file with the command:
-
-```bash
-forge script script/MakeMerkle.s.sol:MakeMerkle
-```
-
-This script first reads from the input file, defines arrays for _leaves_ and _inputs_, and uses helper functions to format data into JSON. It calculates proofs and roots and generates the output file.
-
-### Conclusion
-
-In the `GenerateInput.s.sol` file, we generated an `input.json` file containing addresses and claim amounts for the Merkle tree. The `MakeMerkle.s.sol` file instead reads from this input, calculates the Merkle proofs and root, and outputs these details into an `output.json` file. These scripts will enable us to correctly implement tests for our `MerkleAirdrop` smart contract.
+which will confirm that the user successfully received the tokens through our airdrop.
