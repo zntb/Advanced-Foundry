@@ -1,29 +1,66 @@
-# Introduction
+# Setup
 
-> Welcome back! I'm Ciara, and I'll be guiding you through the Merkle Airdrop section of this course. In this project, we'll delve into **Merkle Trees** and **Signatures** to create our very own _ERC20 airdrop contract_.
+We can begin by creating a repository for our project with the command `mkdir merkle-airdrop` and navigate into it. Ensure you're on the regular version of Foundry by typing `foundryup` in your terminal. You can then run `forge init` to initialize an empty foundry project.
 
-## Airdrop
+## BagelToken
 
-An airdrop occurs when a token development team distributes tokens or allows people to claim them. These tokens can be of various types, including ERC-20, ERC-1155, or ERC-721.
+The token that we are going to airdrop will be a ERC20 token. In the same directory we can make a `BagelToken.sol` contract, where we will use the OpenZeppelin libraries `ERC20` and `Ownable` to create it. For that we first need to install the dependency with the command `forge install openzeppelin/openzeppelin-contracts --no-commit`.
 
-![airdrop](./assets/airdrop.png)
+In the `foundry.toml` file we the spcify a remapping:
 
-Tokens are tipically given for free, with eligibility criteria such as contributing to the project's GitHub repository or participating in the community. This process helps to _bootstrap the project_ by distributing tokens to a **list of eligible addresses**.
+```toml
+remappings = [ '@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/']
+```
 
-### Walkthrough
+And then we are ready to create the contract, which will contain a `constructor` and a `mint` function:
 
-Let's quickly walk through the [code base](https://github.com/Cyfrin/foundry-merkle-airdrop-cu). In the source directory, you'll find the [Bagel token](https://github.com/Cyfrin/foundry-merkle-airdrop-cu/blob/main/src/BagelToken.sol), a minimal ERC-20 token that we will distribute.
+```solidity
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
-The [`MerkleAirdrop`](https://github.com/Cyfrin/foundry-merkle-airdrop-cu/blob/main/src/MerkleAirdrop.sol) contract is the cornerstone of this project, and it uses **Merkle Proofs** to verify address eligibility. It includes a `claim` function that allows addresses to receive the airdrop without paying gas fees. Furthermore, it implements _signatures_ to ensure that only intended recipients can claim the tokens.
+contract BagelToken is ERC20, Ownable {
+  constructor() ERC20("Bagel Token", "BT") Ownable(msg.sender) {
+    //the deployer is the owner of the contract
+  }
 
-We will generate **scripts** to create Merkle Trees, Proofs, and Root Hash, as well as deploy and interact with the contract.
+  function mint(address account, uint256 amount) external onlyOwner {
+    _mint(account, amount);
+  }
+}
+```
 
-In this course, we will cover several topics besides Merkle Trees and Merkle Proofs, such as signatures, the ECDSA (Elliptical Curve Digital Signature) Algorithm, and transaction types.
+### MerkleAirdrop
 
-- After initializing a ZK Sync local node with Docker, we'll deploy the `Bagel` token and `MerkleAirdrop` contracts on it
-- We'll then **sign a message** to allow someone else to call `claim` on your behalf so you can receive the token while not paying for gas fees
-- The initial supply of tokens is created and sent to the airdrop contract
-- Finally, we can claim tokens on behalf of the claiming address (so they do not have to pay gas) using a signature
-- The address will now hold a balance of the airdropped tokens
+We can then create a new file named `MarkleAirdrop.sol`, where we will have a list of addresses and someone from that list who can claim ERC20 tokens.
 
-Let's get started!
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+contract MerkleAirdrop is EIP712 {
+  // list of addresses that can receive tokens
+  // allow someone in the list to claim some tokens
+}
+```
+
+The contracts will be connected by passing the `BagelToken`, or any ERC20 token to the `MerkleAirdrop` constructor. Then we can add our claimer address into an array of addresses:
+
+```solidity
+address [] claimers;
+```
+
+Then we would need a function that checks that the claimer is in this whitelist and allow him to receive tokens.
+
+```solidity
+function claim(address account) external {
+  for (uint256 i = 0; i < claimers.length; i++) {
+    //check if the account is in the claimers array
+  }
+}
+```
+
+However, looping through an array that can grow indefinetely can lead to **performance issues** and calling this function. If there are for example, hundresds of claimers, will become cost prohibitive and will cause a Denial Of Service (DOS). Merkle trees will help solving this issue.
+
+### Merkle Trees and Proofs
+
+Merkle Trees is the data structure that allows us to manage and verify large sets of data efficiently, while Merkle Proofs can help to prove that some piece of data is contained within a group.
