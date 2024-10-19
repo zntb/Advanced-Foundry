@@ -1,49 +1,29 @@
-# Section recap
+# Introduction
 
-## DeFi Recap
+> Welcome back! I'm Ciara, and I'll be guiding you through the Merkle Airdrop section of this course. In this project, we'll delve into **Merkle Trees** and **Signatures** to create our very own _ERC20 airdrop contract_.
 
-Wow, we've done it. This project was enormous, advanced and frankly intense. You should 1000% push this to your GitHub repo and be incredibly proud of yourself for completing this journey.
+## Airdrop
 
-This is one of the hardest and most complicated projects you'll find in educational content in Web3. We've learnt about:
+An airdrop occurs when a token development team distributes tokens or allows people to claim them. These tokens can be of various types, including ERC-20, ERC-1155, or ERC-721.
 
-- DeFi
-- State of the art fuzz testing methodologies
-- Safe use of oracles
-- multifaceted test suites
-- integration and deployment through scripts
-  ...and more!
+![airdrop](./assets/airdrop.png)
 
-Since the filming of this course I've had the `DecentralizedStableCoin` protocol audited on `CodeHawks`. You can find the **[audit report for the contest here](https://www.codehawks.com/contests/cljx3b9390009liqwuedkn0m0)**.
+Tokens are tipically given for free, with eligibility criteria such as contributing to the project's GitHub repository or participating in the community. This process helps to _bootstrap the project_ by distributing tokens to a **list of eligible addresses**.
 
-I encourage you to dive into the findings submitted by the Hawks, if security or auditing is your end goal, this kind of review and research will be invaluable.
+### Walkthrough
 
-After all of this, you know what time it is: **BREAK TIME**. You deserve it, and when you come back there'll be a tonne more content to move onto next.
+Let's quickly walk through the [code base](https://github.com/Cyfrin/foundry-merkle-airdrop-cu). In the source directory, you'll find the [Bagel token](https://github.com/Cyfrin/foundry-merkle-airdrop-cu/blob/main/src/BagelToken.sol), a minimal ERC-20 token that we will distribute.
 
-We have 3 lessons remaining in this section, and they'll be a breeze compared to this one.
+The [`MerkleAirdrop`](https://github.com/Cyfrin/foundry-merkle-airdrop-cu/blob/main/src/MerkleAirdrop.sol) contract is the cornerstone of this project, and it uses **Merkle Proofs** to verify address eligibility. It includes a `claim` function that allows addresses to receive the airdrop without paying gas fees. Furthermore, it implements _signatures_ to ensure that only intended recipients can claim the tokens.
 
-See you soon!
+We will generate **scripts** to create Merkle Trees, Proofs, and Root Hash, as well as deploy and interact with the contract.
 
-### Excercises
+In this course, we will cover several topics besides Merkle Trees and Merkle Proofs, such as signatures, the ECDSA (Elliptical Curve Digital Signature) Algorithm, and transaction types.
 
-**[Arbitrum NFT Challenge](https://arbiscan.io/address/0x3DbBF2F9AcFB9Aac8E0b31563dd75a2D69148D64#code)**
+- After initializing a ZK Sync local node with Docker, we'll deploy the `Bagel` token and `MerkleAirdrop` contracts on it
+- We'll then **sign a message** to allow someone else to call `claim` on your behalf so you can receive the token while not paying for gas fees
+- The initial supply of tokens is created and sent to the airdrop contract
+- Finally, we can claim tokens on behalf of the claiming address (so they do not have to pay gas) using a signature
+- The address will now hold a balance of the airdropped tokens
 
-**[Sepolia NFT Challenge](https://sepolia.etherscan.io/address/0xe5760847db2f10A74Fc575B4803df5fe129811C1#code)**
-
-Additional DeFi Learnings:
-
-- **[DeFi-Minimal](https://github.com/smartcontractkit/defi-minimal/tree/main/contracts)**
-- **[DeFi Dad](https://www.youtube.com/channel/UCatItl6C7wJp9txFMbXbSTg)**
-
-### Lens Protocol
-
-As a _**bonus**_ bit of content I wanted to take a minute to express my support for the `Aave protocol` and the `Aave team` by highlighting one of the amazing products/services they're bringing to the Web3 space.
-
-`Lens Protocols` is a decentralized social layer/platform which empowers users to create social applications, or implement social features into their existing applications.
-
-You can imagine the already widely adopted features and functionality of contemporary social media platforms merged seamlessly with the features of Web3 such as native payments and composability.
-
-At it's core, `Lens` allows developers to extend smart contract functionality in ways similar to API requests on popular social platforms in Web2.
-
-If you're interested in getting started with `Lens` or deploying a protocol on `Lens` on your own, take a look at the **[Lens Documentation](https://www.lens.xyz/docs)** for further information and how to get started.
-
-See you all in the next lesson!
+Let's get started!
