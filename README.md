@@ -1,62 +1,23 @@
-# Deployment Script
+# Adding Signature Verification
 
-To deploy the `BagelToken` and `MerkleAirdrop` contracts, we can follow a structured approach by creating a **deployment script**.
+## Introduction
 
-## `deployMerkleAirdrop` Function
+In this lesson, we will explore the process of allowing a third party to claim tokens on behalf of another account. Our goal is to maintain security by ensuring that the account owner consents to any transactions initiated by the third party.
 
-Inside the `script` directory, we can start coding the deployment contract by importing the required libraries:
+- A straightforward approach might involve **removing the account** from the equation entirely and relying solely on the caller of the function, the `msg.sender`. This would mean that each account would need to initiate the call themselves, covering their own gas fees. However, this method is limited and rigid, as restricts the ability of others to execute transactions on behalf of the account holder.
 
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+- A more flexible solution involves allowing individuals to execute and pay for these transactions **on behalf of the account holder**, given that permission has been granted beforehead. This method can be achieved using digital signatures.
 
-import "MerkleAirdrop.sol";
-import "BagelToken.sol";
-import "forge-std/Script.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-```
+### Signatures
 
-Next, create the deployment function to deploy the contracts, mint tokens, and transfer them to the airdrop contract:
+At a high level, here is how signatures in our contract `MerkleAirdrop` would work:
 
-```solidity
-function deployMerkleAirdrop() public returns (MerkleAirdrop, BagelToken) {
-  vm.startBroadcast();
-  BagelToken bagelToken = new BagelToken();
-  MerkleAirdrop airdrop = new MerkleAirdrop(ROOT, IERC20(bagelToken));
-  bagelToken.mint(bagelToken.owner(), AMOUNT_TO_TRANSFER); // amount for four claimers
-  IERC20(bagelToken).transfer(address(airdrop), AMOUNT_TO_TRANSFER); // transfer tokens to the airdrop contract
-  vm.stopBroadcast();
-  return (airdrop, bagelToken);
-}
-```
+1. **Granting Permission**: An account creates a message stating that a third party can claim the tokens for them. This message is signed using their **private key**, providing a _unique signature_ to grant permission.
 
-### Test Environment Setup
+2. **Signature Verification**: When the third party calls `claim`, the system verifies the signature against the intended account. It checks if the signature indeed originates from the account that the claim is being made for.
 
-To retrieve and use the last deployed contract in our `MerkleAirdrop.t.sol` file, install `foundry-devops` with the command:
+3. **Claim Validation**: If the signature is both valid and the account is listed in the Merkle Tree, the claim is processed, and the tokens are airdropped to the account holder.
 
-```bash
-forge install cyfrin/foundry-devops --no-commit
-```
+### Conclusion
 
-Then, in the `setUp` function, add a check to determine if the current chain is zkSync:
-
-```solidity
-//..
-import { ZkSyncChainChecker } from "foundry-devops/src/ZkSyncChainChecker.sol";
-
-function setUp() public {
-  if (!isZkSyncChain()) {
-    //chain verification
-    DeployMerkleAirdrop deployer = new DeployMerkleAirdrop();
-    (airdrop, token) = deployer.deployMerkleAirdrop();
-  } else {
-    token = new BagelToken();
-    airdrop = new MerkleAirdrop(merkleRoot, token);
-    token.mint(token.owner(), amountToSend);
-    token.transfer(address(airdrop), amountToSend);
-  }
-  (user, userPrivKey) = makeAddrAndKey("user");
-}
-```
-
-The `zkSyncChainChecker` determines if we are currently on a zkSync chain. If we are not, we deploy the contracts using our script and proceed with testing. Otherwise, we directly deploy new instances of the `BagelToken` and `MerkleAirdrop` contracts, mint the necessary tokens to the contract owner, and transfer the required amount of tokens to the `MerkleAirdrop` contract.
+The use of digital signatures allows for a more flexible and secure method of executing airdrops. It enables account holders to authorize others to act on their behalf while ensuring that they only receive transactions they have explicitly approved.
