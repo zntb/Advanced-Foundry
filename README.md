@@ -1,58 +1,85 @@
-# Merkle Proofs
+# Base Airdrop Contract
 
-## Introductioon
+## Introduction
 
-Merkle Trees, Merkle Proofs, and Root Hashes are very important concepts in the realm of IT and blockchain technology. Invented by Ralph Merkle in 1979, a Merkle tree is a hierarchical structure where its base consists of **leaf nodes** representing data that has been hashed. The top of the tree is the **root hash**, created by hashing together pairs of adjacent nodes. This process continues up the tree, resulting in a single **root hash** that will represents all the data in the tree.
+In this lesson, we are going to implement Merkle proofs and Merkle trees in our `MerkleTree.sol` contract by setting up the _constructor_ and creating a _claim_ function.
 
-![Merkle Tree](./assets/merkle-tree.png)
+### Constructor
 
-### Merkle Proofs
-
-Merkle proofs will verify that a specific piece of data is part of a Merkle Tree and consist of the hashes of **sibling nodes** present at each level of the tree.
-
-For example, to prove that `Hash B` is part of the Merkle Tree, you would provide _Hash A_ (sibling 1) at the first level, and the _combined hash of Hash C and Hash D_ (sibling 2) at the second level as proofs.
-
-This allows the Merkle Tree **verifier** to reconstruct a root hash and compare it to the expected root hash. If they match, the original data is confirmed to be part of the Merkle tree.
-
-> 👀❗**IMPORTANT**:br
-> Secure hashing functions, such as `keccak256`, are designed to prevent hash collisions
-
-### Applications
-
-Merkle trees are used in **rollups** to verify state changes and transaction order and in **airdropping**, enabling specific addresses to claim tokens by being included as **leaf nodes** in the tree. As discussed in lesson 1, using Merkle proofs for airdrops is safer and more efficient than relying on a simple array of addresses to prove that a piece of data (e.g. an address) is part of a group.
-
-### OpenZeppelin
-
-OpenZeppelin provides a library for [MerkleProofs](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/dbb6104ce834628e473d2173bbc9d47f81a9eec3/contracts/utils/cryptography/MerkleProof.sol), and we will use it in our smart contract. Its [`verify`](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/dbb6104ce834628e473d2173bbc9d47f81a9eec3/contracts/utils/cryptography/MerkleProof.sol#L32) function takes the proof, the Merkle root, and the leaf to be verified as inputs.
+The constructor should take an ERC-20 token and a Merkle root as parameters, to store them for later use:
 
 ```solidity
-function verify(
-  bytes32[] memory proof,
-  bytes32 root,
-  bytes32 leaf
-) internal pure returns (bool) {
-  return processProof(proof, leaf) == root;
+constructor(bytes32 merkleRoot, IERC20 airdropToken) {
+  i_merkleRoot = merkleRoot;
+  i_airdropToken = airdropToken;
 }
 ```
 
-> 🗒️ **NOTE**:br
-> The **root** is typically stored _on-chain_, while the **proof** is generated _off-chain_.
+A Merkle tree can be represented as the following data structure, made of address and amount pairs. These values are used to calculate the leaf hash and, along with the provided proofs, to compute a root hash. This computed root hash is then compared to the expected root hash provided in the constructor of the `MerkleAirdrop` contract.
 
-The [`processProof`](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/dbb6104ce834628e473d2173bbc9d47f81a9eec3/contracts/utils/cryptography/MerkleProof.sol#L49) function iterates through the proof array, updating the computed hash by hashing it with the next proof element. This process ultimately returns a computed hash, which is compared to the expected root to verify the leaf's presence in the Merkle Tree.
-
-```solidity
-function processProof(
-  bytes32[] memory proof,
-  bytes32 leaf
-) internal pure returns (bytes32) {
-  bytes32 computedHash = leaf;
-  for (uint256 i = 0; i < proof.length; i++) {
-    computedHash = _hashPair(computedHash, proof[i]);
+```json
+{
+  "types": ["address", "uint"],
+  "count": 4,
+  "values": {
+    "0": {
+      "0": "0x6CA6d1e2D5347Bfab1d91e883F1915560e09129D",
+      "1": "2500000000000000000"
+    },
+    "1": {
+      "0": "0xf39Fd6e51aad88F6F4c6aB8827279cffFb92266",
+      "1": "2500000000000000000"
+    },
+    "2": {
+      "0": "0c8Ca207e27a1a8224D1b602bf856479b03319e7",
+      "1": "2500000000000000000"
+    },
+    "3": {
+      "0": "0xf6dBa02C01AF48Cf926579F77C9f874Ca640D91D",
+      "1": "2500000000000000000"
+    }
   }
-  return computedHash;
 }
 ```
+
+### `claim` Function
+
+To allow users on the allowed list to claim tokens, we can create a `claim` function which will take the claimer address, the claim amount, and an array of Merkle proofs. This function will double encode the data we want to check into the `leaf` variable.
+
+To verify the proof, we utilize OpenZeppelin's `MerkleProof::verify` function, which processes the proof, the merkle root and the encoded data. If the function will not succeed, we will revert with the `MerkleAirdrop__InvalidProof` custom error.
+
+```solidity
+function claim(
+  address account,
+  uint256 amount,
+  bytes32[] calldata merkleProof
+) external {
+  bytes32 leaf = keccak256(
+    bytes.concat(keccak256(abi.encode(account, amount)))
+  );
+  if (!MerkleProof.verify(merkleProof, i_merkleRoot, leaf)) {
+    revert MerkleAirdrop__InvalidProof();
+  }
+}
+```
+
+### Event and `safeTransfer`
+
+After successful verification and prior to transferring tokens, it is recommended to emit an event:
+
+```solidity
+event Claim(address indexed account, uint256 indexed amount);
+```
+
+We can then use `safeTransfer` from the `SafeERC20` library to handle token transfers securely:
+
+```solidity
+i_airdropToken.safeTransfer(account, amount);
+```
+
+> 👮‍♂️ **BEST PRACTICE**:br
+> Using `safeTransfer` instead of `transfer` in ERC-20 token contracts provides an added level of security when performing token transfers. This library includes built-in checks to **automatically revert** the transaction if the transfer fails for any reason. If `transfer` fails, on the other hand, it can go unnoticed and create inconsistencies in the contract logic.
 
 ### Conclusion
 
-Merkle proofs will help verifying that a specific piece of data is part of the Merkle tree. By providing hashes of sibling nodes at each level of the tree, a verifier can reconstruct the root hash and confirm data integrity.
+This code effectively initializes the airdrop contract with the required ERC-20 token and Merkle root, verifies claims through Merkle proofs and securely transfers tokens to the claimer address.
