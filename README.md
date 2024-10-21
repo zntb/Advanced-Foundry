@@ -1,264 +1,57 @@
-# Signature Standards
+# ECDSA Signatures
 
-## Introduction
+## ECDSA
 
-In this lesson, we will delve into Ethereum signature standards, specifically EIP 191 and EIP 712. We'll learn how to sign and verify signatures, and understand how these standards enhance data readability and security. Prior to these standards, signing transactions in Metamask resulted in unreadable messages, making it difficult to verify transaction data. EIP 191 and EIP 712 improve data readability and prevent replay attacks, which involve reusing a transaction or signature maliciously.
+ECDSA stands for the [Elliptic Curve Digital Signature Algorithm](https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm), an algorithm based on [elliptic curve](https://en.wikipedia.org/wiki/Elliptic_curve) cryptography. This form of cryptography leverages the unique properties of elliptic curves to perform secure cryptographic functions.
 
-### Simple Signature Verification
+Elliptic curves possess several key mathematical properties that make them suitable for cryptography:
 
-Let's start with a basic signature verification contract. It retrieves the **signer address** using the `ecrecover` function and then verifies signatures by comparing the signer with the expected one.
+- They have no singular points.
+- They are smooth curves without sharp corners.
+- They are symmetric about the x-axis.
+- Every point (x, y) on the curve has an inverse point (x, −y) also on the curve.
+- Adding two distinct points (x1, y1) and (x2, y2) on the curve involves drawing a line through them, which intersects the curve at a third point.
 
-```solidity
-function getSignerSimple(
-  uint256 message,
-  uint8 _v,
-  bytes32 _r,
-  bytes32 _s
-) public pure returns (address) {
-  bytes32 hashedMessage = bytes32(message); // If string, use keccak256(abi.encodePacked(string))
-  address signer = ecrecover(hashedMessage, _v, _r, _s);
-  return signer;
-}
-```
+In the context of blockchain technology, ECDSA is used for
 
-> 🗒️ **NOTE**:br > `ecrecover` is a function built into the Ethereum protocol.
+1. Generating key pairs
+2. Create signatures
+3. Verify signatures
 
-```solidity
-function verifySignerSimple(
-  uint256 message,
-  uint8 _v,
-  bytes32 _r,
-  bytes32 _s,
-  address signer
-) public pure returns (bool) {
-  address actualSigner = getSignerSimple(message, _v, _r, _s);
-  require(signer == actualSigner);
-  return true;
-}
-```
+### Public Key Cryptography
 
-### EIP 191
+Signatures in blockchain provide a means for authentication. In Ethereum, proof of ownership is achieved using **public** and **private key** pairs, which create _digital signatures_ unique to each user. These signatures verify that the sender of a transaction is the owner of the account, a system known as public key cryptography involving _asymmetric encryption_.
 
-EIP 191 facilitates pre-made signatures or _sponsored transactions_. For instance, Bob can sign a message, and Alice can send the transaction and pay for Bob’s gas fees.
+- **Private Key**: is used to sign messages and derive the public key
+- **Public Key**: is used to verify that the owner knows the private key. It is virtually impossible to derive the private key from the public key, making this system highly secure.
 
-![signed-tx](./assets/signed-tx.png)
+When a new Ethereum account is created, it generates a pair of cryptographic keys: a public key and a private key. The public key is then processed using the keccak256 hashing algorithm, converting it into a fixed-size string of 32 bytes (256 bits). The Ethereum address is derived from the last 20 bytes of this hashed public key.
 
-This EIP standardizes the signed data format:
+### The SECP256k1 Curve
 
-```solidity
-0x19 <1 byte version> <version specific data> <data to sign>
-```
+The specific curve used in ECDSA in Ethereum is called the **secp256k1 curve**.
 
-- **0x19 Prefix:** Indicates that the data is a signature.
-- **1-byte Version:** Defines the signed data version.
-  - `0x00`: Data with an intended validator.
-  - `0x01`: Structured data, commonly used in production apps and associated with EIP 712.
-  - `0x45`: Personal signed messages.
-- **Version Specific Data:** For version `0x01`, this is the validator address.
-- **Data to Sign:** The message we want to sign.
+For every x-coordinate on the curve, two valid signatures exist, which implies that if a malicious actor knows one signature, they can compute the second one. This vulnerability is known as **signature malleability**, which can lead to replay attacks.
 
-Here is how to set up EIP 191, by encoding and then hashing the message before retrieving the signer:
+There are constants associated with the SECP 256k1 curve:
 
-```solidity
-function getSigner191(
-  uint256 message,
-  uint8 _v,
-  bytes32 _r,
-  bytes32 _s
-) public view returns (address) {
-  // Prepare data for hashing
-  bytes1 prefix = bytes1(0x19);
-  bytes1 eip191Version = bytes1(0);
-  address intendedValidatorAddress = address(this);
-  bytes32 applicationSpecificData = bytes32(message);
+- **Generator Point (G)**: A predefined point on the curve.
+- **n**: A prime number defining the length of the private key.
 
-  // Standardized message format
-  bytes32 hashedMessage = keccak256(
-    abi.encodePacked(
-      prefix,
-      eip191Version,
-      intendedValidatorAddress,
-      applicationSpecificData
-    )
-  );
+The public key is an elliptic curve point calculated by multiplying the private key with the generator point `G`.
 
-  address signer = ecrecover(hashedMessage, _v, _r, _s);
-  return signer;
-}
-```
+ECDSA signatures consist of three integers: `v`, `r`, and `s`:
 
-### EIP 712
+1. The message is hashed
+2. A random number `k` (the nonce) is generated.
+3. **Calculating Signature Components**:
+   - **r**: Represents the x-coordinate on the elliptic curve of the point resulting from multiplying the nonce `k` by the generator point `G`.
+   - **s**: Serves as proof of the signer's knowledge of the private key, calculated using the nonce `k`, the hash of the message, the private key, and the `r` value.
+   - **v**: Indicates the polarity (positive or negative y-axis) of the point on the elliptic curve.
 
-EIP-712 is a standard for structuring and signing typed data in Ethereum, enhancing readability and ensuring specificity to certain contracts. The format for signing data using EIP-712 is:
+### Verifying Signatures
 
-```solidity
-0x19 0x01 <domainSeparator> <hashStruct(message)>
-```
+Verifying ECDSA signatures involves using the signed message, the signature, and the public key to check if the signature is valid. This process essentially reverses the signing algorithm to ensure the provided `r` coordinate matches the calculated one.
 
-1. **Domain Separator:** Version-specific data.
-2. **hashStruct(message):** The hash of the structured message you want to sign.
-
-### EIP 712: Domain Separator
-
-To define the domain separator, we first declare a domain separator struct and its type hash:
-
-```solidity
-struct EIP712Domain {
-    string name;
-    string version;
-    uint256 chainId;
-    address verifyingContract;
-};
-
-bytes32 constant EIP712DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-```
-
-The domain separator is obtained by encoding and hashing the `EIP712Domain` struct:
-
-```solidity
-bytes32 domainSeparator = keccak256(
-  abi.encode(
-    EIP712DOMAIN_TYPEHASH,
-    keccak256(bytes(eip712Domain.name)),
-    keccak256(bytes(eip712Domain.version)),
-    eip712Domain.chainId,
-    eip712Domain.verifyingContract
-  )
-);
-```
-
-### EIP 712: Message Hash Struct
-
-First, define the message struct and its type hash:
-
-```solidity
-struct Message {
-    uint256 number;
-};
-
-bytes32 public constant MESSAGE_TYPEHASH = keccak256("Message(uint256 number)");
-```
-
-Then encode and hash them together:
-
-```solidity
-bytes32 hashedMessage = keccak256(abi.encode(MESSAGE_TYPEHASH, Message({ number: message })));
-```
-
-### EIP 712: Implementation
-
-Steps for EIP 712 implementation:
-
-1. Define a domain separator struct with essential data.
-2. Hash the struct and its type hash to create the domain separator.
-3. Create a message type hash and combine it with the message data to generate a hashed message.
-4. Combine all elements with a prefix and version byte to form a final digest.
-5. Use `ecrecover` with the digest and signature to retrieve the signer's address and verify authenticity.
-
-```solidity
-contract SignatureVerifier {
-  function getSignerEIP712(
-    uint256 message,
-    uint8 _v,
-    bytes32 _r,
-    bytes32 _s
-  ) public view returns (address) {
-    // Prepare data for hashing
-    bytes1 prefix = bytes1(0x19);
-    bytes1 eip712Version = bytes1(0x01); // EIP-712 is version 1 of EIP-191
-    bytes32 hashStructOfDomainSeparator = domainSeparator;
-
-    // Hash the message struct
-    bytes32 hashedMessage = keccak256(
-      abi.encode(MESSAGE_TYPEHASH, Message({ number: message }))
-    );
-
-    // Combine all elements
-    bytes32 digest = keccak256(
-      abi.encodePacked(
-        prefix,
-        eip712Version,
-        hashStructOfDomainSeparator,
-        hashedMessage
-      )
-    );
-    return ecrecover(digest, _v, _r, _s);
-  }
-}
-```
-
-We can then verify the signer as in the first example, but using `verifySignerEIP712`:
-
-```solidity
-function verifySignerEIP712(
-  uint256 message,
-  uint8 _v,
-  bytes32 _r,
-  bytes32 _s,
-  address signer
-) public view returns (bool) {
-  address actualSigner = getSignerEIP712(message, _v, _r, _s);
-  require(signer == actualSigner);
-  return true;
-}
-```
-
-### EIP 712: OpenZeppelin
-
-It's recommended to use OpenZeppelin libraries to simplify the process, by using `EIP712::_hashTypedDataV4` function:
-
-- Create the message type hash and hash it with the message data:
-
-```solidity
-bytes32 public constant MESSAGE_TYPEHASH = keccak256("Message(uint256 message)");
-
-function getMessageHash(uint256 _message) public view returns (bytes32) {
-    return _hashTypedDataV4(
-        keccak256(
-            abi.encode(
-                MESSAGE_TYPEHASH,
-                Message({message: _message})
-            )
-        )
-    );
-}
-```
-
-- Retrieve the signer with `ECDSA.tryRecover` and compare it to the actual signer:
-
-```solidity
-function getSignerOZ(
-  uint256 digest,
-  uint8 _v,
-  bytes32 _r,
-  bytes32 _s
-) public pure returns (address) {
-  (
-    address signer /* ECDSA.RecoverError recoverError */ /* bytes32 signatureLength */,
-    ,
-
-  ) = ECDSA.tryRecover(digest, _v, _r, _s);
-  return signer;
-}
-```
-
-```solidity
-function verifySignerOZ(
-  uint256 message,
-  uint8 _v,
-  bytes32 _r,
-  bytes32 _s,
-  address signer
-) public pure returns (bool) {
-  address actualSigner = getSignerOZ(getMessageHash(message), _v, _r, _s);
-  require(actualSigner == signer);
-  return true;
-}
-```
-
-> 👀❗**IMPORTANT**:br
-> EIP 712 prevents replay attacks by uniquely identifying the transaction.
-
-### Conclusion
-
-EIP 191 standardizes the format of signed data, while EIP 712 extends data standardization to structured data and introduces domain separators to prevent cross-domain replay attacks.
+> 👮‍♂️ **BEST PRACTICE**:br
+> Using `ecrecover` directly can lead to security issues such as signature malleability. This can be mitigated by restricting the value of `s` to one half of the curve. The use of **OpenZeppelin's ECDSA library** is recommended, which provides protection against signature malleability and prevents invalid signatures from returning a zero address.
