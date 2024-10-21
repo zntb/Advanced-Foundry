@@ -1,46 +1,18 @@
-# Modifying The Tests
+# Test On zkSync
 
-## Lesson Overview
+We can also run our `MerkleAirdrop.t::testUsersCanClaim` test on the zkSync chain.
 
-In this lesson, we'll explore how to empower a third party address, the `gasPayer`, to make claims on a user's behalf. The user will then sign a message to authorize this address to execute the `MerkleAirdrop::claim` function on his behalf.
+To do this, we can start by switching to the zkSync version by running `foundryup --zksync`. Since the zkSync compiler operates differently from the standard solc compiler, it's better to verify that everything builds correctly before deploying.
 
-### Setup
-
-First, in the `setup()` function, we'll create a new address, `gasPayer`, which will have permission to call the claim function:
-
-```solidity
-gasPayer = makeAddr("gasPayer");
+```bash
+forge build --ZK Sync
 ```
 
-Next, the `user` address will sign a message with their private key, authorizing the `gasPayer` address to perform the claim:
+> 🗒️ **NOTE**:br
+> If you encounter any warnings, they may be related to the use of `ecrecover`. These warnings can be safely ingnored since indicate that the accounts should use an ECDSA private key and should be EOAs. This warning are shown because the ZK Sync era supports native account abstraction.
 
-```solidity
-vm.startPrank(user);
-(uint8 v, bytes32 r, bytes32 s) = signMessage(userPrivKey, user);
-vm.stopPrank();
+Finally, we can run our tests on zkSync with the following command:
+
+```bash
+forge test --zksync -vvv
 ```
-
-### Signing the Message
-
-The `signMessage` function will calculate the **message digest**, which will be signed using the user's private key. The `vm.sign` cheatcode will generate the v, r, and s values necessary for the signature:
-
-```solidity
-function signMessage(
-  uint256 privKey,
-  address account
-) public view returns (uint8 v, bytes32 r, bytes32 s) {
-  bytes32 hashedMessage = airdrop.getMessageHash(account, amountToCollect);
-  (v, r, s) = vm.sign(privKey, hashedMessage);
-}
-```
-
-### Completing the Tests
-
-Finally, the `gasPayer` address can call the `MerkleAirdrop::claim` function on behalf of the `user`, passing the user's signature (v, r, s) into the function:
-
-```solidity
-vm.prank(gasPayer);
-airdrop.claim(user, amountToCollect, proof, v, r, s);
-```
-
-Afterward, we can verify that the test passes: the user's balance increases as expected, indicating that the `gasPayer` successfully claimed the tokens on the `user`'s behalf.
