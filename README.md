@@ -1,32 +1,33 @@
-# Creating A Signature
+# Splitting A Signature
 
-## Introduction
+In this lesson we are going to split the signature into its _v,r,s_, component starting by saving this byte signature as a variable:
 
-In this lesson, we'll create a signature for a default **Anvil** address, allowing a third-party account to claim tokens on its behalf.
-
-Ensure you have a local Anvil node running, by executing the `anvil` command in your terminal and use the `foundryup` command to get the vanilla version of Foundry.
-
-Copy the [Makefile content](https://github.com/Cyfrin/foundry-merkle-airdrop-cu/blob/main/Makefile) associated with this course. Then, run the `make deploy` command. This will execute a script that deploys both the `BagelToken` and `MerkleAirdrop` contracts.
-
-### MessageHash
-
-To obtain the data for signing, use the `getMessageHash` function on the `MerkleAirdrop` contract. This function requires an account address, a `uint256` amount, and the Anvil node URL (`http://localhost:8545`).
-
-```bash
-cast call 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 "getMessageHash(address,uint256)" 0xf39Fd6e51aad88F6f4ce6aB88272ffFb92266 25000000000000000000 --rpc-url http://localhost:8545
-0x184e30c4b19f5e304a893524210d50346dad61c461e79155b910e73fd856dc72
+```solidity
+bytes private SIGNATURE = hex"fbda..c11c";
 ```
 
-### Signing
+In this `SIGNATURE` variable, the _r,s,v_ values are concatenated together in this exact order:
 
-With the data ready for signing, use the `cast wallet sign` command. Include the `--no-hash` flag to prevent rehashing, as the message is already in bytes format. Also, use the `--private-key` flag with the first Anvil private key.
+1. `r` is the first 32 bytes of the signature
+2. `s` is the next 32 bytes of the signature
+3. `v` is the final byte of the signature
 
-> 👮‍♂️ **Best Practice**:br
-> When working on a testnet or using a real account, avoid using the private key directly. Instead, use the `--account` flag and your keystore account for signing.
+To isolate each component, we'll create a function called `splitSignature` . This function will verify that the signature is 65 bytes long. If it is, we can proceed to split it into its components, otherwise we will revert with a custom error.
 
-```bash
-cast wallet sign --no-hash 0x184e30c4b19f5e304a893524210d50346dad61c461e79155b910e73fd856dc72 --private-key 0xac093f74bec39a17e36ba4a6b4d238ff944bacb478cbeb5efcae784d7bf4f2ff80
-0xfbd2270e6f23ff5e9248480c0f4be8a4e9bd77c3ad0b1333cc60b5debc611602a2a06c24085d8d7c038bad84edc1144dc11c
+```solidity
+function splitSignature(
+  bytes memory sig
+) public pure returns (uint8 v, bytes32 r, bytes32 s) {
+  if (sig.length != 65) {
+    revert __ClaimAirdropScript__InvalidSignatureLength();
+  }
+  assembly {
+    r := mload(add(sig, 32))
+    s := mload(add(sig, 64))
+    v := byte(0, mload(add(sig, 96)))
+  }
+}
 ```
 
-Well done! We just obtained a **single signature**, which we will break down into the v, r, and s components in the next lesson.
+> 🗒️ **NOTE**:br
+> When working with functions from libraries like OpenZeppelin or other APIs, the signature format typically follows the order _v,r,s_ instead of the _r,s,v_ we used in this lesson.
