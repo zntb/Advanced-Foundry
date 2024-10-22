@@ -1,33 +1,23 @@
-# Splitting A Signature
+# Executing The Anvil Script
 
-In this lesson we are going to split the signature into its _v,r,s_, component starting by saving this byte signature as a variable:
+Now that the file `Interact.s.sol` is complete, we can execute it using the following command:
 
-```solidity
-bytes private SIGNATURE = hex"fbda..c11c";
+```bash
+forge script script/Interact.s.sol:ClaimAirdrop --rpc-url http://localhost:8545 --private-key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d --broadcast
 ```
 
-In this `SIGNATURE` variable, the _r,s,v_ values are concatenated together in this exact order:
+Here we are utilizing the **second Anvil key** to claim tokens and covering gas fees as a third-party address. The airdropped tokens will be then sent to the first Anvil address CLAIMING_ADDRESS we hardcoded in our script.
 
-1. `r` is the first 32 bytes of the signature
-2. `s` is the next 32 bytes of the signature
-3. `v` is the final byte of the signature
+After that, we can verify if the first address has in fact received the airdrop:
 
-To isolate each component, we'll create a function called `splitSignature` . This function will verify that the signature is 65 bytes long. If it is, we can proceed to split it into its components, otherwise we will revert with a custom error.
-
-```solidity
-function splitSignature(
-  bytes memory sig
-) public pure returns (uint8 v, bytes32 r, bytes32 s) {
-  if (sig.length != 65) {
-    revert __ClaimAirdropScript__InvalidSignatureLength();
-  }
-  assembly {
-    r := mload(add(sig, 32))
-    s := mload(add(sig, 64))
-    v := byte(0, mload(add(sig, 96)))
-  }
-}
+```bash
+cast call 0x5FbDB2315678afecb367f032d93F642f64180aa3 "balanceOf(address)"
 ```
 
-> 🗒️ **NOTE**:br
-> When working with functions from libraries like OpenZeppelin or other APIs, the signature format typically follows the order _v,r,s_ instead of the _r,s,v_ we used in this lesson.
+cast will respond with the `0x000000000000000000000000000000000000000000000015af1d78b58c40000` hex number, which we can convert into decimal format with:
+
+```bash
+cast --to-dec 0x000000000000000000000000000000000000000000000015af1d78b58c40000
+```
+
+This conversion will reveal the actual amount airdropped to the first Anvil account, which is equivalent to 25 Bagel tokens
