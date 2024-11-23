@@ -1,94 +1,212 @@
-# Using Delegatecall
+# Overview of the EIP-1967
 
-## Delegate Call
+## EIP-1967 Proxy
 
-In this section we're going to be learning how to build our own proxies and in order to do this we first need an understanding of the delegateCall function.
+In this lesson we'll apply what we've learnt and get our hands dirty with a small proxy example. The code for this exercise can be found **[here](https://github.com/Cyfrin/foundry-upgrades-f23/tree/main/src/sublesson)**. You can copy and paste this code into Remix if you'd like to follow along!
 
-At it's core delegateCall is going to be similar to the call function we learnt about earlier. If you need a refresher, I encourage you to go back to the **[NFT lesson](https://updraft.cyfrin.io/courses/advanced-foundry/how-to-create-an-NFT-collection/evm-opcodes-advanced?lesson_format=video)** of this course for valuable context.
-
-Many of the things I'll be going over here will be available through **[Solidity By Example](https://solidity-by-example.org/delegatecall/)** if you want more practice or insight.
-
-Let's consider the two simple contracts provided as examples:
-
-Contract B is very simple, it contains 3 storage variables which are set by the setVars function.
+> ❗ **NOTE**
+> This is one of the more advanced section of this course, don't feel bad if things are confusing. You're welcome to skip this sublesson if you're less worried about how things work behind the scenes.
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
 
-// NOTE: Deploy this contract first
-contract B {
-  // NOTE: storage layout must be the same as contract A
-  uint256 public num;
-  address public sender;
-  uint256 public value;
+pragma solidity ^0.8.19;
 
-  function setVars(uint256 _num) public payable {
-    num = _num;
-    sender = msg.sender;
-    value = msg.value;
-  }
-}
+import "@openzeppelin/contracts/proxy/Proxy.sol";
+
+contract SmallProxy is Proxy {
+    // This is the keccak-256 hash of "eip1967.proxy.implementation" subtracted by 1
+    bytes32 private constant _IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+
+    function setImplementation(address newImplementation) public {
+        assembly {
+            sstore(_IMPLEMENTATION_SLOT, newImplementation)
+        }
+    }
+
+    function _implementation() internal view override returns (address implementationAddress) {
+        assembly {
+            implementationAddress := sload(_IMPLEMENTATION_SLOT)
+        }
+    }
 ```
 
-If we recall, storage acts _kind of_ like an array and each storage variable is sequentially assigned a slot in storage, in the order in which the variable is declared in a contract.
+This `SmallProxy` example contains a lot of `Yul`. Yul is a sort of in-line Assembly that allows you to write really low-level code. Like anything low-level it comes with increased risk and severity of mistakes, it's good to avoid using `Yul` as often as you can justify.
 
-![Delegatecall](./assets/delegatecall1.png)
+For more information on `Yul`, check out the **[Yul Documentation](https://docs.soliditylang.org/en/latest/yul.html)**.
 
-Now consider Contract A:
+Now, within `SmallProxy` we're importing Proxy.sol from our good friends OpenZeppelin. Looking at the code, we can get a better idea of how things are actually being handled.
 
 ```solidity
-contract A {
-  uint256 public num;
-  address public sender;
-  uint256 public value;
+// SPDX-License-Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.0.0) (proxy/Proxy.sol)
 
-  function setVars(address _contract, uint256 _num) public payable {
-    // A's storage is set, B is not modified.
-    (bool success, bytes memory data) = _contract.delegatecall(
-      abi.encodeWithSignature("setVars(uint256)", _num)
-    );
+pragma solidity ^0.8.20;
+
+/**
+ * @dev This abstract contract provides a fallback function that delegates all calls to another contract using the EVM
+ * instruction `delegatecall`. We refer to the second contract as the _implementation_ behind the proxy, and it has to
+ * be specified by overriding the virtual {_implementation} function.
+ *
+ * Additionally, delegation to the implementation can be triggered manually through the {_fallback} function, or to a
+ * different contract through the {_delegate} function.
+ *
+ * The success and return data of the delegated call will be returned back to the caller of the proxy.
+ */
+abstract contract Proxy {
+  /**
+   * @dev Delegates the current call to `implementation`.
+   *
+   * This function does not return to its internal call site, it will return directly to the external caller.
+   */
+  function _delegate(address implementation) internal virtual {
+    assembly {
+      // Copy msg.data. We take full control of memory in this inline assembly
+      // block because it will not return to Solidity code. We overwrite the
+      // Solidity scratch pad at memory position 0.
+      calldatacopy(0, 0, calldatasize())
+
+      // Call the implementation.
+      // out and outsize are 0 because we don't know the size yet.
+      let result := delegatecall(gas(), implementation, 0, calldatasize(), 0, 0)
+
+      // Copy the returned data.
+      returndatacopy(0, 0, returndatasize())
+
+      switch result
+      // delegatecall returns 0 on error.
+      case 0 {
+        revert(0, returndatasize())
+      }
+      default {
+        return(0, returndatasize())
+      }
+    }
+  }
+
+  /**
+   * @dev This is a virtual function that should be overridden so it returns the address to which the fallback
+   * function and {_fallback} should delegate.
+   */
+  function _implementation() internal view virtual returns (address);
+
+  /**
+   * @dev Delegates the current call to the address returned by `_implementation()`.
+   *
+   * This function does not return to its internal call site, it will return directly to the external caller.
+   */
+  function _fallback() internal virtual {
+    _delegate(_implementation());
+  }
+
+  /**
+   * @dev Fallback function that delegates calls to the address returned by `_implementation()`. Will run if no other
+   * function in the contract matches the call data.
+   */
+  fallback() external payable virtual {
+    _fallback();
   }
 }
 ```
 
-In contract A we're doing much the same thing, the biggest different of course being that we're using `delegateCall`.
+There are really only 2 functions in this contract (ignoring the virtual \_implementation function). We have \_delegate, fallback/\_fallback. The fallback functions simply route unrecognized call data to the \_delegate function which then routes the call to an implementation contract.
 
-This works fundamentally similar to `call`. In the case of `call` we would be calling the `setVars` function on Contract B and this would update the storage on Contract B, as you would expect.
+In SmallProxy.sol, we only have 2 functions, `setImplementation` and `_implementation`, the aforementioned virtual function.
 
-With delegateCall however, we're borrowing the logic from Contract B and referencing the storage of Contract A. This is entirely independent of what the variables are actually named.
+This virtual function is returning the implementation address and showcases the need for our next topic...
 
-![Delegatecall](./assets/delegatecall2.png)
+### EIP-1967
 
-### Remix
+**[Ethereum Improvement Proposal (now ERC)-1967](https://eips.ethereum.org/EIPS/eip-1967)**.
 
-Let's give this a shot ourselves, in Remix. If you'd like to try this yourself and follow along, you can copy the contract code from **[Solidity by Example](https://solidity-by-example.org/delegatecall/)**.
+The need to regularly utilize storage to reference things in implementation (specifically the implementation address) led to the desire for EIP-1967: Standard Proxy Storage Slots. This proposal would allocate standardized slots in storage specifically for use by proxies.
 
-Once the code has been pasted into Remix, we should be able to compile and begin with deploying Contract B. We can see that all of our storage variables begin empty.
+In our minimalistic example, we're assigning our \_IMPLEMENTATION_SLOT to a constant value for this purpose.
 
-![Delegatecall](./assets/delegatecall3.png)
+```solidity
+// This is the keccak-256 hash of "eip1967.proxy.implementation" subtracted by 1
+bytes32 private constant _IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+```
 
-By calling setVars and passing an argument, we can see how the storage variables within Contract B are updated as we've come to expect.
+To illustrate this, let's write a basic implementation contracts, you can add this directly into SmallProxy.sol in Remix.
 
-![Delegatecall](./assets/delegatecall4.png)
+```solidity
+contract ImplementationA {
+  uint256 public value;
 
-Now we can deploy Contract A. This contract should default to empty storage variables as well. When we call `setVars` on Contract A however, it's going to borrow the setVars logic from Contract B and we'll see it update it's own storage, rather than Contract B's.
+  function setValue(uint256 newValue) public {
+    value = newValue;
+  }
+}
+```
+
+Great, so any time a call is sent to our proxy contract, we would expect it to be routed to this implementation, remembering of course that the data sent with the function will actually be stored within SmallProxy's storage.
+
+To make it a little easier to check the data stored in SmallProxy.sol we can add a couple helper functions.
+
+```solidity
+function getDataToTransact(uint256 numberToUpdate) public pure returns (bytes memory){
+    return abi.encodeWithSignature("setValue(uint256)", numberToUpdate)
+}
+```
+
+You should remember this abi encoding from the NFT section, where we learnt how to encode anything! This function will help us encode the call data we need to send to our proxy. In addition to this, let's set up a function to check the storage in our proxy, allowing us to see how it's changing.
+
+```solidity
+function readStorage() public view returns (uint256 valueAtStorageSlotZero) {
+  assembly {
+    valueAtStorageSlotZero := sload(0)
+  }
+}
+```
+
+With these functions in place, we should be able to deploy our contracts in Remix. The first thing we'll need to do is call the setImplementation function on our SmallProxy contract, passing the address of `ImplementationA`. This is how the proxy knows where to delegate calls.
+
+![eip1967](./assets/eip-1967-1.png)
+
+By passing an argument to `getDataToTransact` we're provided the encoded call data necessary to set our `valueAtStorageSlotZero` to `777`. Remember, sending a transaction to our proxy with this call data should update the storage _in the proxy_.
 
 > ❗ **NOTE**
-> We'll need to pass Contract B as an input parameter to Contract A's setVars function so it knows where to delegate to!
+> Because SmallProxy.sol doesn't have a function of it's own which matches the call data's function selector, the fallback function will be engaged. This in turn routes the call data to our delegate function, delegating the call to ImplementationA.
 
-![Delegatecall](./assets/delegatecall5.png)
+To see this in action, we just need to paste our `getDataToTransact` return value into the CALLDATA field and his `Transact`.
 
-Importantly, this behavior, due to referencing storage slots directly, is independent of any naming conventions used for the variables themselves.
+![eip1967](./assets/eip-1967-2.png)
 
-![Delegatecall](./assets/delegatecall6.png)
+`valueAtStorageSlotZero` has been updated on our proxy contract!
 
-In fact, if Contract A didn't have any of it's own declared variables at all, the appropriate storage slots would _still_ be updated!
+### Upgrading SmallProxy.sol
 
-Now, this is where things get really interesting. What if we changed the variable type of `number` in Contract A to a `bool`? If we then call delegateCall on Contract B, we'll see it's set our storage slot to `true`. The bool type detects our input as `true`, with `0` being the only acceptable input for `false`.
+Now, let's demonstrate how upgrading this protocol would work. Add another contract to SmallProxy.sol:
 
-![Delegatecall](./assets/delegatecall7.png)
+```solidity
+contract ImplementationB {
+  uint256 public value;
+
+  function setValue(uint256 newValue) public {
+    value = newValue + 2;
+  }
+}
+```
+
+Next, deploy ImplementationB and then call setImplementation on SmallProxy, passing this new implementation address.
+
+Just like before, we can use `getDataToTransact` to determine our necessary call data. By passing _the same_ call data, pertaining to the argument 777 we can see ...
+
+![eip1967](./assets/eip-1967-3.png)
+
+`valueAtStorageSlotZero` now reflects the new implementation logic of `newValue + 2`!
+
+### Selector Clashes
+
+One quick final note on function selector clashes which I'd mentioned earlier. In our example here, SmallProxy.sol only really has one function setImplementation, but if the implementation contract _also_ had a function called setImplementation, it would be easy to see how this conflict could occur. Were this the case, it would be impossible to call the setImplementation function contained by the Implementation contract, because it would _always_ be processed by the proxy.
 
 ### Wrap Up
 
-Low-level functions like `call` and `delegateCall` are powerful, but risky. They allow us to send/receive arbitrary function calls, or to route function calls to specific implementation addresses, but as we've seen, a special attention must be paid to how storage is handled or various clashes and unexpected behavior may arise.
+Hopefully this minimalistic example has shed some light on the power of upgradeable proxies. This kind of power should also give you pause and make you consider the effects of trusting this degree of centrality to the protocol developers.
+
+If anything here has been confusing, don't be discouraged, this is advanced stuff. Join the community in the discussions tab on the course **[GitHub Repository](https://github.com/Cyfrin/foundry-full-course-f23/discussions)**, or join us in **[Discord](https://discord.gg/cyfrin)** to have you questions answers and concerns alleviated.
+
+In the next lesson, we'll look more closely at one specific type of upgradeable pattern, the Universal Upgradeable Proxy (UUPS).
+
+See you there!
