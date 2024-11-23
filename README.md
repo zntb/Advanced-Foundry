@@ -1,68 +1,53 @@
-# Deploy And Claim On zkSync Sepolia
+# Upgradable Smart Contracts -Introduction
 
-## Introduction
+Welcome to another informative blog post on the world of smart contracts. In this lesson, we will take a closer look at upgradable smart contracts, exploring the good, the bad, and the vital information you need to use them.
 
-In this lesson, we will be **manually deploying on zkSync Sepolia**. Although scripts are highly recommended in order to avoid mistakes and save funds, we will proceed with typing command directly in the terminal since scripts do not work well on zkSync at the moment of recording.
+To put this into perspective, upgradable smart contracts are a complex subject with potential drawbacks, which isn't the best route to default on. They sound great in theory, promising flexibility and adaptability. However, we've repeatedly seen that when there's too much centralized control over contracts, problems arise.
 
-As usual, we will deploy the contracts `BagelToken` and `MerkleAirdrop`, generate the message hash, sign it, and split our long signature into its _v, r, s_ components. We'll then mint and trasfer tokens to the `MerkleAirdrop` contract, claim the tokens from a third party address and finally verify this claim.
+![Upgradable Smart Contracts](./assets/upgrade1.png)
 
-> 🗒️ **NOTE**:br
-> In MetaMask, you can create a wallet, for example, "updraft," using keystores where accounts are pre-saved, preventing the need to use the private key directly. For this demonstration, _updraft_ will deploy the contracts while _updraft 2_ will handle token claims.
+Let's dig deeper to understand the nuance of this subject and why it's important for your career as a smart contract developer.
 
-### Deploying Contracts
+## What Are the Downside of Upgradable Smart Contracts?
 
-To deploy both contracts, specify the contract path and the necessary environment variables, then save the contract address as an environment variable:
+If you asked for real-life examples of where the potential downsides of upgradable smart contracts have manifested, it's safe to say we've got plenty. From hacks to lost funds, the risks are real.
 
-```bash
-export ZKSYNC_SEPOLIA_RPC_URL=https://sepolia.era.zksync.dev
-forge create source/BagelToken --rpc-url ${ZKSYNC_SEPOLIA_RPC_URL} --account updraft --legacy --zksync
-export TOKEN_ADDRESS=0x7B66C3E36d026232408a655cF7cFdEeFA099D6d0
-```
+This is where the immutable nature of smart contracts comes in - a feature that developers cherish since it implies that once a contract is deployed, nobody can modify or tamper with it. Interesting enough, the unchangeable aspect can become a pain if we want to upgrade a contract to perform new functions or squash a bug.
 
-Next, deploy the `MerkleAirdrop` contract and save its address:
+The exciting thing is, though the code deployed to an address is immutable, there's still room for change. In fact, smart contracts update all the time. Think token transfers or any functionality really—they frequently update their balances or variables. In other words, while the logic remains unchangeable, the contracts aren't as static as they seem.
 
-```bash
-forge create source/MerkleAirdrop --constructor-args ${TOKEN_ADDRESS} ${ROOT_HASH} --rpc-url ${ZKSYNC_SEPOLIA_RPC_URL} --account updraft --legacy --zksync
-export AIRDROP_ADDRESS=<deployed_airdrop_address>
-```
+## Upgrading Your Smart Contracts: A Guided Approach
 
-### Message and Signature
+So, if upgrading smart contracts tampers with their essential immutability, how can we approach the situation more wisely? Let's look at three different patterns or philosophies we can use:
 
-To claim tokens, get the message hash and then sign it using the second wallet:
+1. Not really upgrading
+2. Social migration
+3. Proxy (with subcategories like metamorphic contracts, transparent upgradable proxies, and universal upgradable proxies)
 
-```bash
-cast call ${AIRDROP_ADDRESS} "getMessageHash(address,uint256)" 0x2ea3970Ed82D5b30be821FAAD4a731D35964F7dd 25000000000000000000 --rpc-url ${ZKSYNC_SEPOLIA_RPC_URL}
-cast wallet sign --no-hash 0xb37630ae79f68b63ba0240a965dc09dbc188bc082fd2425d70c1885933fd66a1 --account updraft2
-```
+### Not Really Upgrading
 
-After saving the signed message into a `signature.txt` file and removing its `0x` prefix, split it into its _v, r, s_ components with the `SplitSignature` script. Save the three environment variables `V`, `R`, and `S` for later use.
+The "Not Really Upgrading" method is the simplest form of "upgrading" a smart contract. The idea here is parameterizing everything—the logic we've deployed is there and that's what users interact with. This involves having setter functions that can change certain parameters.
 
-```bash
-forge script script/SplitSignature.s.sol:SplitSignature
-```
+For instance, if you have a set reward that distributes a token at a 1% rate every year, you can have a setter function to adjust that distribution rate. While it's easy to implement, it has limitations: unless you anticipated all possible future functionality when writing the contract, you won't be able to add it in the future.
 
-### Minting and Transferring Tokens
+Another question that arises is—who gets access to these functions? If a single person holds the key, it becomes a centralized smart contract, going against decentralization's core principle. To address this, you can add a governance contract to your protocol, allowing proportional control.
 
-Before claiming tokens, mint and transfer tokens to the airdrop contract:
+### Social Migration
 
-```bash
-cast send ${TOKEN_ADDRESS} "mint(address,uint256)" 0x52d64ED1fd0877797e2030fc914259e052F2bD67 25000000000000000000 --account updraft --rpc-url  ${ZKSYNC_SEPOLIA_RPC_URL}
-cast send ${TOKEN_ADDRESS} "transfer(address,uint256)" ${AIRDROP_ADDRESS} 25000000000000000000 --account updraft --rpc-url  ${ZKSYNC_SEPOLIA_RPC_URL}
-```
+In line with maintaining the immutability of smart contracts, another method is social migration. It involves deploying a new contract and socially agreeing to consider the new contract as the 'real' one.
 
-### Claiming Tokens
+It has some significant advantages, the main being the adherence to the essential immutability principle of smart contracts. With no built-in upgradeability, the contract will function the same way, whether invoked now or in 50,000 years. But one major disadvantage is that you'd now have a new contract address for an already existing token. This would require every exchange listing your token to update to this new contract address.
 
-With everything set, perform the claim operation:
+Moving the state of the first contract to the second one is also a challenging task. You need to devise a migration method to transport the storage from one contract to the other. You can learn more about the social migration method from [this blog post](https://blog.trailofbits.com/2018/09/05/contract-upgrade-anti-patterns/) written by Trail of Bits.
 
-```bash
-cast send ${AIRDROP_ADDRESS} "claim(address,uint256,bytes32[],uint8,bytes32,bytes32)" 0x2ea3970Ed82D5b30be821FAAD4a731D35964F7dd 25000000000000000000 <proof> ${V} ${R} ${S} "[0x4fd31fee0e75780cd67704fbc43caee70fddcaa43631e2e1bc9fb233fada2394,0x81f0e530b56872b6fc3e10f8873804230663f8407e21cef901b8aeb06a25e5e2]" --account updraft --rpc-url ${ZKSYNC_SEPOLIA_RPC_URL}
-```
+### Proxies
 
-### Verifying the Claim
+Finally, let's talk about proxies, the holy grail of smart contract upgrades. Proxies allow for state continuity and logical updates while maintaining the same contract address. Users may interact with contracts through proxies without ever realizing anything changed behind the scenes.
 
-To verify the claim, check the balance of the second account. If the balance reflects the claimed amount (25000000000000000000), the process is successful.
+There are a ton of proxy methodologies, but three are worth discussing here: Transparent Proxies, Universal Upgradable Proxies (UPS), and the Diamond Pattern. Each has its benefits and drawbacks, but the focus is on maintaining contract functionality and decentralization.
 
-```bash
-cast call ${TOKEN_ADDRESS} "balanceOf(address)" 0x2ea3970Ed82D5b30be821FAAD4a731D35964F7dd --rpc-url ${ZKSYNC_SEPOLIA_RPC_URL}
-cast --to-dec 0x0000000000000000000000000015af1d78b58c40000
-```
+## Key Takeaways
+
+Dealing with upgradable smart contracts can be complex, but understanding the pros and cons helps in making the right decision while developing smart contracts. Do remember that upgradable smart contracts might have their advantages, but they also come with their possible drawbacks, such as centralized control and increased potential for breaches. Always weigh the necessity against the risks before deciding on using upgradable smart contracts.
+
+That was it for todays lesson. I hope you enjoyed it and learned something new. We well see you again on the next chapter so keep learning and keep building!
