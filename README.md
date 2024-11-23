@@ -1,53 +1,94 @@
-# Upgradable Smart Contracts -Introduction
+# Using Delegatecall
 
-Welcome to another informative blog post on the world of smart contracts. In this lesson, we will take a closer look at upgradable smart contracts, exploring the good, the bad, and the vital information you need to use them.
+## Delegate Call
 
-To put this into perspective, upgradable smart contracts are a complex subject with potential drawbacks, which isn't the best route to default on. They sound great in theory, promising flexibility and adaptability. However, we've repeatedly seen that when there's too much centralized control over contracts, problems arise.
+In this section we're going to be learning how to build our own proxies and in order to do this we first need an understanding of the delegateCall function.
 
-![Upgradable Smart Contracts](./assets/upgrade1.png)
+At it's core delegateCall is going to be similar to the call function we learnt about earlier. If you need a refresher, I encourage you to go back to the **[NFT lesson](https://updraft.cyfrin.io/courses/advanced-foundry/how-to-create-an-NFT-collection/evm-opcodes-advanced?lesson_format=video)** of this course for valuable context.
 
-Let's dig deeper to understand the nuance of this subject and why it's important for your career as a smart contract developer.
+Many of the things I'll be going over here will be available through **[Solidity By Example](https://solidity-by-example.org/delegatecall/)** if you want more practice or insight.
 
-## What Are the Downside of Upgradable Smart Contracts?
+Let's consider the two simple contracts provided as examples:
 
-If you asked for real-life examples of where the potential downsides of upgradable smart contracts have manifested, it's safe to say we've got plenty. From hacks to lost funds, the risks are real.
+Contract B is very simple, it contains 3 storage variables which are set by the setVars function.
 
-This is where the immutable nature of smart contracts comes in - a feature that developers cherish since it implies that once a contract is deployed, nobody can modify or tamper with it. Interesting enough, the unchangeable aspect can become a pain if we want to upgrade a contract to perform new functions or squash a bug.
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
 
-The exciting thing is, though the code deployed to an address is immutable, there's still room for change. In fact, smart contracts update all the time. Think token transfers or any functionality really—they frequently update their balances or variables. In other words, while the logic remains unchangeable, the contracts aren't as static as they seem.
+// NOTE: Deploy this contract first
+contract B {
+  // NOTE: storage layout must be the same as contract A
+  uint256 public num;
+  address public sender;
+  uint256 public value;
 
-## Upgrading Your Smart Contracts: A Guided Approach
+  function setVars(uint256 _num) public payable {
+    num = _num;
+    sender = msg.sender;
+    value = msg.value;
+  }
+}
+```
 
-So, if upgrading smart contracts tampers with their essential immutability, how can we approach the situation more wisely? Let's look at three different patterns or philosophies we can use:
+If we recall, storage acts _kind of_ like an array and each storage variable is sequentially assigned a slot in storage, in the order in which the variable is declared in a contract.
 
-1. Not really upgrading
-2. Social migration
-3. Proxy (with subcategories like metamorphic contracts, transparent upgradable proxies, and universal upgradable proxies)
+![Delegatecall](./assets/delegatecall1.png)
 
-### Not Really Upgrading
+Now consider Contract A:
 
-The "Not Really Upgrading" method is the simplest form of "upgrading" a smart contract. The idea here is parameterizing everything—the logic we've deployed is there and that's what users interact with. This involves having setter functions that can change certain parameters.
+```solidity
+contract A {
+  uint256 public num;
+  address public sender;
+  uint256 public value;
 
-For instance, if you have a set reward that distributes a token at a 1% rate every year, you can have a setter function to adjust that distribution rate. While it's easy to implement, it has limitations: unless you anticipated all possible future functionality when writing the contract, you won't be able to add it in the future.
+  function setVars(address _contract, uint256 _num) public payable {
+    // A's storage is set, B is not modified.
+    (bool success, bytes memory data) = _contract.delegatecall(
+      abi.encodeWithSignature("setVars(uint256)", _num)
+    );
+  }
+}
+```
 
-Another question that arises is—who gets access to these functions? If a single person holds the key, it becomes a centralized smart contract, going against decentralization's core principle. To address this, you can add a governance contract to your protocol, allowing proportional control.
+In contract A we're doing much the same thing, the biggest different of course being that we're using `delegateCall`.
 
-### Social Migration
+This works fundamentally similar to `call`. In the case of `call` we would be calling the `setVars` function on Contract B and this would update the storage on Contract B, as you would expect.
 
-In line with maintaining the immutability of smart contracts, another method is social migration. It involves deploying a new contract and socially agreeing to consider the new contract as the 'real' one.
+With delegateCall however, we're borrowing the logic from Contract B and referencing the storage of Contract A. This is entirely independent of what the variables are actually named.
 
-It has some significant advantages, the main being the adherence to the essential immutability principle of smart contracts. With no built-in upgradeability, the contract will function the same way, whether invoked now or in 50,000 years. But one major disadvantage is that you'd now have a new contract address for an already existing token. This would require every exchange listing your token to update to this new contract address.
+![Delegatecall](./assets/delegatecall2.png)
 
-Moving the state of the first contract to the second one is also a challenging task. You need to devise a migration method to transport the storage from one contract to the other. You can learn more about the social migration method from [this blog post](https://blog.trailofbits.com/2018/09/05/contract-upgrade-anti-patterns/) written by Trail of Bits.
+### Remix
 
-### Proxies
+Let's give this a shot ourselves, in Remix. If you'd like to try this yourself and follow along, you can copy the contract code from **[Solidity by Example](https://solidity-by-example.org/delegatecall/)**.
 
-Finally, let's talk about proxies, the holy grail of smart contract upgrades. Proxies allow for state continuity and logical updates while maintaining the same contract address. Users may interact with contracts through proxies without ever realizing anything changed behind the scenes.
+Once the code has been pasted into Remix, we should be able to compile and begin with deploying Contract B. We can see that all of our storage variables begin empty.
 
-There are a ton of proxy methodologies, but three are worth discussing here: Transparent Proxies, Universal Upgradable Proxies (UPS), and the Diamond Pattern. Each has its benefits and drawbacks, but the focus is on maintaining contract functionality and decentralization.
+![Delegatecall](./assets/delegatecall3.png)
 
-## Key Takeaways
+By calling setVars and passing an argument, we can see how the storage variables within Contract B are updated as we've come to expect.
 
-Dealing with upgradable smart contracts can be complex, but understanding the pros and cons helps in making the right decision while developing smart contracts. Do remember that upgradable smart contracts might have their advantages, but they also come with their possible drawbacks, such as centralized control and increased potential for breaches. Always weigh the necessity against the risks before deciding on using upgradable smart contracts.
+![Delegatecall](./assets/delegatecall4.png)
 
-That was it for todays lesson. I hope you enjoyed it and learned something new. We well see you again on the next chapter so keep learning and keep building!
+Now we can deploy Contract A. This contract should default to empty storage variables as well. When we call `setVars` on Contract A however, it's going to borrow the setVars logic from Contract B and we'll see it update it's own storage, rather than Contract B's.
+
+> ❗ **NOTE**
+> We'll need to pass Contract B as an input parameter to Contract A's setVars function so it knows where to delegate to!
+
+![Delegatecall](./assets/delegatecall5.png)
+
+Importantly, this behavior, due to referencing storage slots directly, is independent of any naming conventions used for the variables themselves.
+
+![Delegatecall](./assets/delegatecall6.png)
+
+In fact, if Contract A didn't have any of it's own declared variables at all, the appropriate storage slots would _still_ be updated!
+
+Now, this is where things get really interesting. What if we changed the variable type of `number` in Contract A to a `bool`? If we then call delegateCall on Contract B, we'll see it's set our storage slot to `true`. The bool type detects our input as `true`, with `0` being the only acceptable input for `false`.
+
+![Delegatecall](./assets/delegatecall7.png)
+
+### Wrap Up
+
+Low-level functions like `call` and `delegateCall` are powerful, but risky. They allow us to send/receive arbitrary function calls, or to route function calls to specific implementation addresses, but as we've seen, a special attention must be paid to how storage is handled or various clashes and unexpected behavior may arise.
