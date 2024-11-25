@@ -1,65 +1,50 @@
-# Upgrade UUPS proxy smart contracts
+# Testing UUPS proxies
 
-## UUPS Upgrade
+## UUPS Tests
 
-Let's keep our momentum from the last lesson and jump right into writing our UpgradeBox.s.sol script. The boilerplate for this will be as expected.
+In this lesson we're going to be writing our test suite which will enable us to really demonstrate how this upgradeability works in practice.
 
-```solidity
-// SPDX-License-Identifier: MIT
-
-pragma solidity ^0.8.18;
-
-import { Script } from "forge-std/Script.sol";
-
-contract UpgradeBox is Script {
-  function run() external returns (address) {}
-}
-```
-
-Alright, in order to reference our deployment of ERC1967Proxy, we're going to use our DevOps Tools library again to assist. Begin by installing it.
-
-```bash
-forge install Cyfrin/foundry-devops --no-commit
-```
-
-We can then import this and leverage the get_most_recent_deployment functionality to acquire our ERC1967Proxy address.
+Begin by creating the file `test/DeployAndUpgradeTest.t.sol`. We know the drill in setting this up by now!
 
 ```solidity
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.18;
 
-import { Script } from "forge-std/Script.sol";
-import { DevOpsTools } from "lib/foundry-devops/src/DevOpsTools.sol";
+import { Test } from "forge-std/Test.sol";
+import { DeployBox } from "../script/DeployBox.s.sol";
+import { UpgradeBox } from "../script/UpgradeBox.s.sol";
+import { BoxV1 } from "../src/BoxV1.sol";
+import { BoxV2 } from "../src/BoxV2.sol";
 
-contract UpgradeBox is Script {
-  function run() external returns (address) {
-    address mostRecentDeployment = DevOpsTools.get_most_recent_deployment(
-      "ERC1967Proxy",
-      block.chainid
-    );
+contract DeployAndUpgradeTest is Test {
+  DeployBox public deployer;
+  UpgradeBox public upgrader;
+  address public OWNER = makeAddr("owner");
+
+  address public proxy;
+
+  function setUp() {
+    deployer = new DeployBox();
+    upgrader = new UpgradeBox();
+    proxy = deployer.run(); // currently points to BoxV1
   }
 }
 ```
 
-Next, we'll need to import and deploy BoxV2!
+This is a little more than boilerplate, but I trust your skills to be improving as we continue, so walking through each step granularly shouldn't be as necessary. In the above, we're simply importing many of the contracts we expect to be working with in our tests and then declaring and deploying them within our setUp function.
+
+Now we can write our test, we'll need to deploy BoxV2.
 
 ```solidity
-...
-import {BoxV2} from "../src/BoxV2.sol";
+function testUpgrades() public {
+  BoxV2 box2 = new BoxV2();
 
-contract UpgradeBox is Script{
-    function run() external returns (address){
-        address mostRecentDeployment = DevOpsTools.get_most_recent_deployment("ERC1967Proxy", block.chainid);
-
-        vm.startBroadcast();
-        BoxV2 newBox = new BoxV2();
-        vm.stopBroadcast();
-    }
+  upgrader.upgradeBox(proxy, address(box2));
 }
 ```
 
-In order to modularize things a bit for the tests we'll write in the next lesson, we'll write an `upgradeBox` function in which our proxy is called.
+Recall what our upgradeBox function is going within UpgradeBox.s.sol:
 
 ```solidity
 function upgradeBox(
@@ -75,55 +60,68 @@ function upgradeBox(
 }
 ```
 
-> ❗ **NOTE**
-> We're unable to call a function on an address provided as a parameter here, but by wrapping the address in BoxV1 (which needs to be imported), we provide our function the ABI necessary to reference the upgradeTo function within the proxy address.
+This function is taking the proxy address and our new implementation address as parameters and calling the upgradeTo function.
 
-Now, we can add upgradeBox to our scripts run function.
+Now, in our test, we can set an expected value and compare it against what version a call to the `version` function on our proxy will return.
 
 ```solidity
-// SPDX-License-Identifier: MIT
+function testUpgrades() public {
+  BoxV2 box2 = new BoxV2();
 
-pragma solidity ^0.8.18;
+  upgrader.upgradeBox(proxy, address(box2));
 
-import { Script } from "forge-std/Script.sol";
-import { DevOpsTools } from "lib/foundry-devops/src/DevOpsTools.sol";
-import { BoxV1 } from "../src/BoxV1.sol";
-import { BoxV2 } from "../src/BoxV2.sol";
-
-contract UpgradeBox is Script {
-  function run() external returns (address) {
-    address mostRecentDeployment = DevOpsTools.get_most_recent_deployment(
-      "ERC1967Proxy",
-      block.chainid
-    );
-
-    vm.startBroadcast();
-    BoxV2 newBox = new BoxV2();
-    vm.stopBroadcast();
-
-    address proxy = upgradeBox(mostRecentDeployment, address(newBox));
-  }
-
-  function upgradeBox(
-    address proxyAddress,
-    address newBox
-  ) public returns (address) {
-    vm.startBroadcast();
-    BoxV1 proxy = BoxV1(proxyAddress);
-    proxy.upgradeTo(address(newBox));
-    vm.stopBroadcast();
-
-    return address(proxy);
-  }
+  uint256 expectedValue = 2;
+  assertEq(expectedValue, BoxV2(proxy).version());
 }
 ```
 
+It's best practice to split tests up as best one can, but let's check more here while we're at it. We added new function to BoxV2, let's ensure they work after our upgrade.
+
+```solidity
+function testUpgrades() public {
+  BoxV2 box2 = new BoxV2();
+
+  upgrader.upgradeBox(proxy, address(box2));
+
+  uint256 expectedValue = 2;
+  assertEq(expectedValue, BoxV2(proxy).version());
+
+  BoxV2(proxy).setNumber(7);
+  assertEq(7, BoxV2(proxy).getNumber());
+}
+```
+
+You know what, I changed my mind, let's add one more simple test to verify the implementation we begin with.
+
+```solidity
+function testProxyStartAsBoxV1() public {
+  vm.expectRevert();
+  BoxV2(proxy).setNumber(7);
+}
+```
+
+We would expect the above to revert because BoxV1, on deployment, doesn't contain a setNumber function! Let's test these one at a time.
+
+```bash
+forge test --mt testProxyStartAsBoxV1
+```
+
+We would expect this to pass if it reverts.
+
+![UUPS Proxy Tests](./assets/uups-tests1.png)
+
+Looks great! Our BoxV1 doesn't have the setNumber function. Now we can try our other test!
+
+```bash
+forge test --mt testUpgrades
+```
+
+![UUPS Proxy Tests](./assets/uups-tests2.png)
+
 ### Wrap Up
 
-We now have the ability to programmatically upgrade our BoxV1 protocol to BoxV2!
+Boom! We've successfully upgraded our upgradeable Box Protocol.
 
-In this UpgradeBox script, we are acquiring our most recent ERC1967 deployment by leveraging the DevOpsTools library. We're then deploying BoxV2 and then calling our upgradeBox function. This function passes our new BoxV2 address to our proxy, upgrading the protocol's implementation address!
+I've included additional tests for this within the **[GitHub Repo](https://github.com/Cyfrin/foundry-upgrades-f23)** for this section, so don't hesitate to try and write your own and compare what you come up with versus the repo!
 
-In the next lesson we'll set up some tests to see this in action.
-
-Let's gooooo!
+In this section we'll be walking through one big example test, but I encourage you to try to write more, as always.
