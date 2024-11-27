@@ -1,151 +1,115 @@
-## Account Abstraction Lesson 6: `EntryPoint` Contract
+# Account Abstraction Lesson 7: Execute Function Ethereum
 
-In this lesson, our main objective is to make sure that our contract can only be called by the `EntryPoint`. Along the way, we will:
+It's time to add the finishing touches to our **minimal account**. In this lesson we will do this by:
 
-- import `IEntryPoint` Interface
-- update our constructor to take `entryPoint`
-- create our first state variable, getter function, and modifier
+- creating an `execute` function to allow interaction with other dapps.
+- adding a modifier to allow owner or `EntryPoint` to call our contract.
+- creating a `receive` function to enable our contract to accept payments.
 
-First, let's make sure that `validateUserOp` is only callable by the `EntryPoint` Contract. Let's import the `IEntryPoint` Interface. This will help us understand how the `EntryPoint` works and give us some valuable getter functions.
+**LET'S GET STARTED!**
 
-```solidity
-import { IEntryPoint } from "lib/account-abstraction/contracts/interfaces/IEntryPoint.sol";
-```
+---
 
-Next, add `address entryPoint` as a parameter to our constructor. Then, create a state variable and set it to private immutable.
+## Connecting to Other dapps
 
-```solidity
-IEntryPoint private immutable i_entryPoint;
+We've come a long way, but we aren't quite done yet. We still need to enable our contract to interact with other dapps. At the moment, we can only validate operations. We want to be able to send them, too. Essentially, the EntryPoint is going to validate our account. Then it will send the data to our account. Our account then becomes the `msg.sender`, which can then interact with other contracts. So, let's get there.
 
-constructor(address entryPoint) Ownable(msg.sender) {
-     i_entryPoint = IEntryPoint(entryPoint)
-}
-```
-
-If we click into the contract we can see all of the functions that the `EntryPoint` can use. Feel free to look over them before moving on.
-
-As previously mentioned, `IEntryPoint` will give us some getters. Copy and paste this header at the bottom of your code. Then, we will add some getter functions under it.
+In order for us to make all this happen, we need a new external function called `execute`. It will pass an address for the destination, uint256 for eth, and bytes calldata for ABI encoded function data. If not successful, it will revert. Be sure to add `MinimalAccount__CallFailed(result)` to the errors section of your code.
 
 ```solidity
 /*//////////////////////////////////////////////////////////////
-                                GETTERS
+                           EXTERNAL FUNCTIONS
 //////////////////////////////////////////////////////////////*/
-```
-
-> ❗ **NOTE** There is a neat tool that can produce these awesome headers automatically in the terminal. You can check that out here if you want.
-> [transmission11/headers](https://github.com/transmissions11/headers)
-
-Here is the getter function.
-
-```solidity
-function getEntryPoint() external view returns (address) {
-  return address(i_entryPoint);
+function execute(
+  address dest,
+  uint256 value,
+  bytes calldata functionData
+) external requireFromEntryPointOrOwner {
+  (bool success, bytes memory result) = dest.call{ value: value }(functionData);
+  if (!success) {
+    revert MinimalAccount__CallFailed(result);
+  }
 }
 ```
 
-Next, we want to create a modifier called `requireFromEntryPoint`. Place it above your constructor.
+### Two Ways to Call
+
+Now, we want to allow users to call directly from their wallet to the account contract. We will need to create a modifier for this.
 
 ```solidity
-modifier requireFromEntryPoint() {
-        if (msg.sender != address(i_entryPoint)) {
-            revert MinimalAccount__NotFromEntryPoint();
+ modifier requireFromEntryPointOrOwner() {
+        if (msg.sender != address(i_entryPoint) && msg.sender != owner()) {
+            revert MinimalAccount__NotFromEntryPointOrOwner();
         }
         _;
     }
 ```
 
-Here, if the caller of the contract is not `EntryPoint` it will revert. You may have also noticed that our modifier has a custom error. Let's place it above our state variable.
+The modifier is set up in a way that will allow the **owner** or the **EntryPoint** can call our account. If not the address of either one, it will revert and give us a custom error, `MinimalAccount__NotFromEntryPointOrOwner`. Let's place it with the other errors.
 
 ```solidity
-error MinimalAccount__NotFromEntryPoint();
-```
-
-Now we can use our modifier to make our `validateUserOp` callable exclusively from the `EntryPoint`. Let's place `requireFromEntryPoint` in our function.
-
-```solidity
-function validateUserOp(
-  PackedUserOperation calldata userOp,
-  bytes32 userOpHash,
-  uint256 missingAccountFunds
-) external requireFromEntryPoint returns (uint256 validationData) {
-  validationData = _validateSignature(userOp, userOpHash);
-  // _validateNonce()
-  _payPrefund(missingAccountFunds);
-}
-```
-
-And now we are all set for the next steps. Before we move on, let's take a look at what our code looks like so far. Take a moment to reflect on what we have gained to this point in the course. When you are ready, move on to the next lesson.
-
-```solidity
-contract MinimalAccount is IAccount, Ownable {
-  /*//////////////////////////////////////////////////////////////
+/*//////////////////////////////////////////////////////////////
                                  ERRORS
-    //////////////////////////////////////////////////////////////*/
-  error MinimalAccount__NotFromEntryPoint();
-
-  /*//////////////////////////////////////////////////////////////
-                            STATE VARIABLES
-    //////////////////////////////////////////////////////////////*/
-  IEntryPoint private immutable i_entryPoint;
-
-  /*//////////////////////////////////////////////////////////////
-                               MODIFIERS
-    //////////////////////////////////////////////////////////////*/
-  modifier requireFromEntryPoint() {
-    if (msg.sender != address(i_entryPoint)) {
-      revert MinimalAccount__NotFromEntryPoint();
-    }
-    _;
-  }
-
-  /*//////////////////////////////////////////////////////////////
-                               FUNCTIONS
-    //////////////////////////////////////////////////////////////*/
-  constructor(address entryPoint) Ownable(msg.sender) {
-    i_entryPoint = IEntryPoint(entryPoint);
-  }
-
-  // A signature is valid, if it's the MinimalAccount owner
-  function validateUserOp(
-    PackedUserOperation calldata userOp,
-    bytes32 userOpHash,
-    uint256 missingAccountFunds
-  ) external requireFromEntryPoint returns (uint256 validationData) {
-    validationData = _validateSignature(userOp, userOpHash);
-    // _validateNonce()
-    _payPrefund(missingAccountFunds);
-  }
-
-  // EIP-191 version of the signed hash
-  function _validateSignature(
-    PackedUserOperation calldata userOp,
-    bytes32 userOpHash
-  ) internal view returns (uint256 validationData) {
-    bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(
-      userOpHash
-    );
-    address signer = ECDSA.recover(ethSignedMessageHash, userOp.signature);
-    if (signer != owner()) {
-      return SIG_VALIDATION_FAILED;
-    }
-    return SIG_VALIDATION_SUCCESS;
-  }
-
-  function _payPrefund(uint256 missingAccountFunds) internal {
-    if (missingAccountFunds != 0) {
-      (bool success, ) = payable(msg.sender).call{
-        value: missingAccountFunds,
-        gas: type(uint256).max
-      }("");
-      (success);
-    }
-  }
-
-  /*//////////////////////////////////////////////////////////////
-                                GETTERS
-    //////////////////////////////////////////////////////////////*/
-  function getEntryPoint() external view returns (address) {
-    return address(i_entryPoint);
-  }
-}
+//////////////////////////////////////////////////////////////*/
+error MinimalAccount__NotFromEntryPoint();
+error MinimalAccount__NotFromEntryPointOrOwner();
+error MinimalAccount__CallFailed(result);
 ```
+
+### Accept Payments
+
+The last thing we need to do now is add a `receive` function. We will make it `external payable` so that the contract can accept funds from our `_payPrefund` function to pay for transactions. Place `receive() external payable {}` just below our constructor, like so:
+
+```solidity
+constructor(address entryPoint) Ownable(msg.sender) {
+  i_entryPoint = IEntryPoint(entryPoint);
+}
+
+receive() external payable {}
+```
+
+> ❗ **NOTE** `receive()` is a special function in Solidity that allows the contract to accept plain Ether transfers. It is defined as receive() external payable {} and does not take any arguments or return any values. This function is placed just below the constructor in the contract, allowing the contract to accept funds directly, which can be used for paying transaction fees.
+
+Congratulations! We are now ready to write scripts, tests, and deploy our minimal account. But first, let's review this lesson.
+
+---
+
+### Questions for Review
+
+<summary>1. What is the purpose of the `execute` function in our minimal account contract?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+It allows the minimal account contract to interact with other dapps by sending transactions.
+
+</details>
+
+<summary>2. Why do we need the `requireFromEntryPointOrOwner` modifier?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+It ensures that only the EntryPoint contract or the owner of the minimal account contract can execute certain functions.
+
+</details>
+
+<summary>3. How does the `receive` function enable our contract to accept payments?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+This is a special function in Solidity that allows the contract to accept plain Ether transfers.
+
+</details>
+
+When you are ready, move on to the next lesson.
