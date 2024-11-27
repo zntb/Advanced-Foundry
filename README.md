@@ -1,115 +1,129 @@
-# Account Abstraction Lesson 7: Execute Function Ethereum
+# Account Abstraction Lesson 8: Deploy Ethereum
 
-It's time to add the finishing touches to our **minimal account**. In this lesson we will do this by:
-
-- creating an `execute` function to allow interaction with other dapps.
-- adding a modifier to allow owner or `EntryPoint` to call our contract.
-- creating a `receive` function to enable our contract to accept payments.
-
-**LET'S GET STARTED!**
+This is an exciting time in our learning journey. We have finished our **minimal contract**. Now it is time to write some **deploy scripts**. We will be setting up a lot of code in this lesson. **We won't be going too deep into explanations here**. However, you are encouraged to do so on your own.
 
 ---
 
-## Connecting to Other dapps
+Let's start by naming our first script in the `script` folder. Name it `DeployMinimal.s.sol`. Let's also go ahead and another script - `HelperConfig.s.sol`. We will need a HelperConfig because the EntryPoint contract will vary on different chains. And we will also need a `SendPackedUserOp.s.sol` This will be a vital piece for us and we will be doing a lot of work in this script. Let's get started in `DeployMinimal.s.sol`.
 
-We've come a long way, but we aren't quite done yet. We still need to enable our contract to interact with other dapps. At the moment, we can only validate operations. We want to be able to send them, too. Essentially, the EntryPoint is going to validate our account. Then it will send the data to our account. Our account then becomes the `msg.sender`, which can then interact with other contracts. So, let's get there.
-
-In order for us to make all this happen, we need a new external function called `execute`. It will pass an address for the destination, uint256 for eth, and bytes calldata for ABI encoded function data. If not successful, it will revert. Be sure to add `MinimalAccount__CallFailed(result)` to the errors section of your code.
+**<span style="color:red">DeployMinimal.s.sol</span>**
 
 ```solidity
-/*//////////////////////////////////////////////////////////////
-                           EXTERNAL FUNCTIONS
-//////////////////////////////////////////////////////////////*/
-function execute(
-  address dest,
-  uint256 value,
-  bytes calldata functionData
-) external requireFromEntryPointOrOwner {
-  (bool success, bytes memory result) = dest.call{ value: value }(functionData);
-  if (!success) {
-    revert MinimalAccount__CallFailed(result);
-  }
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import { Script } from "forge-std/Script.sol";
+import { MinimalAccount } from "src/ethereum/MinimalAccount.sol";
+
+contract DeployMinimal is Script {
+  function run() public {}
+
+  function deployMinimalAccount() public {}
 }
 ```
 
-### Two Ways to Call
+If you remember(or go back) to our MinimalAccount, the constructor passes `address entrypoint`.
 
-Now, we want to allow users to call directly from their wallet to the account contract. We will need to create a modifier for this.
+**<span style="color:red">MinimalAccount.sol</span>**
 
 ```solidity
- modifier requireFromEntryPointOrOwner() {
-        if (msg.sender != address(i_entryPoint) && msg.sender != owner()) {
-            revert MinimalAccount__NotFromEntryPointOrOwner();
-        }
-        _;
+constructor(address entrypoint)
+```
+
+Let's set this up in our `HelperConfig.s.sol`.
+
+> ❗ **NOTE** This is a large block of code below. Please be sure to follow along with the video.
+
+**<span style="color:red">HelperConfig.s.sol</span>**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import {Script} from "forge-std/Script.sol";
+
+contract HelperConfig is Script {
+    error HelperConfig__InvalidChainId();
+
+    struct NetworkConfig {
+        address entryPoint;
+        address account;
     }
-```
 
-The modifier is set up in a way that will allow the **owner** or the **EntryPoint** can call our account. If not the address of either one, it will revert and give us a custom error, `MinimalAccount__NotFromEntryPointOrOwner`. Let's place it with the other errors.
+    uint256 constant ETH_SEPOLIA_CHAIN_ID = 11155111;
+    uint256 constant ZKSYNC_SEPOLIA_CHAIN_ID = 300;
+    uint256 constant LOCAL_CHAIN_ID = 31337;
+    address constant BURNER_WALLET = 0X; //Your burner testnet wallet address here
 
-```solidity
-/*//////////////////////////////////////////////////////////////
-                                 ERRORS
-//////////////////////////////////////////////////////////////*/
-error MinimalAccount__NotFromEntryPoint();
-error MinimalAccount__NotFromEntryPointOrOwner();
-error MinimalAccount__CallFailed(result);
-```
+    NetworkConfig public localNetworkConfig;
+    mapping(uint256 chainId => NetworkConfig) public networkConfigs;
 
-### Accept Payments
+    constructor() {
+        networkConfigs[ETH_SEPOLIA_CHAIN_ID] = getEthSepoliaConfig();
 
-The last thing we need to do now is add a `receive` function. We will make it `external payable` so that the contract can accept funds from our `_payPrefund` function to pay for transactions. Place `receive() external payable {}` just below our constructor, like so:
+    }
 
-```solidity
-constructor(address entryPoint) Ownable(msg.sender) {
-  i_entryPoint = IEntryPoint(entryPoint);
+    function getConfig() public returns (NetworkConfig memory) {
+        return getConfigByChainId(block.chainid);
+    }
+
+    function getConfigByChainId(uint256 chainId) public returns (NetworkConfig memory) {
+        if (chainId == LOCAL_CHAIN_ID) {
+            return getOrCreateAnvilEthConfig();
+        } else if (networkConfigs[chainId].account != address(0)) {
+            return networkConfigs[chainId];
+        } else {
+            revert HelperConfig__InvalidChainId();
+        }
+    }
+
+    function getEthSepoliaConfig() public pure returns (NetworkConfig memory) {
+        return NetworkConfig({
+            entryPoint: 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789,
+            account: BURNER_WALLET
+        });
+    }
+
+    function getZkSyncSepoliaConfig() public pure returns (NetworkConfig memory) {
+        return NetworkConfig({
+            entryPoint: address(0), // There is no entryPoint in zkSync!
+            account: BURNER_WALLET
+        });
+    }
+
+    function getOrCreateAnvilEthConfig() public returns (NetworkConfig memory) {
+        if (localNetworkConfig.account != address(0)) {
+            return localNetworkConfig;
+        }
+    }
 }
-
-receive() external payable {}
 ```
 
-> ❗ **NOTE** `receive()` is a special function in Solidity that allows the contract to accept plain Ether transfers. It is defined as receive() external payable {} and does not take any arguments or return any values. This function is placed just below the constructor in the contract, allowing the contract to accept funds directly, which can be used for paying transaction fees.
+Now that we have our `HelperConfig`, let's import it in `DeployMinimal.s.sol`.
 
-Congratulations! We are now ready to write scripts, tests, and deploy our minimal account. But first, let's review this lesson.
+**<span style="color:red">DeployMinimal.s.sol</span>**
 
----
+```solidity
+import { HelperConfig } from "script/HelperConfig.s.sol";
+```
 
-### Questions for Review
+Then we need to add it to our `deployMinimalAccount` function.
 
-<summary>1. What is the purpose of the `execute` function in our minimal account contract?</summary>
+```solidity
+function deployMinimalAccount() public returns (HelperConfig, MinimalAccount) {
+  HelperConfig helperConfig = new HelperConfig();
+  HelperConfig.NetworkConfig memory config = helperConfig.getConfig();
 
----
+  vm.startBroadcast();
+  MinimalAccount minimalAccount = new MinimalAccount(config.account);
+  minimalAccount.transferOwnership(msg.sender);
+  vm.stopBroadcast();
+  return (helperConfig, minimalAccount);
+}
+```
 
-<details>
+Let's run `forge build` in our terminal to check that everything is compiling.
 
-**<summary><span style="color:red">Click for Answers</span></summary>**
+> ❗ **NOTE** You may see some yellow warnings, but that is not concerning at this point. As long as there aren't any red errors, you are good.
 
-It allows the minimal account contract to interact with other dapps by sending transactions.
-
-</details>
-
-<summary>2. Why do we need the `requireFromEntryPointOrOwner` modifier?</summary>
-
----
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-It ensures that only the EntryPoint contract or the owner of the minimal account contract can execute certain functions.
-
-</details>
-
-<summary>3. How does the `receive` function enable our contract to accept payments?</summary>
-
----
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-This is a special function in Solidity that allows the contract to accept plain Ether transfers.
-
-</details>
-
-When you are ready, move on to the next lesson.
+We did a lot of coding in this lesson. However, we've still go a way to go. Take a minute to reflect on the code that we have written so far. When you are ready, move on to the next lesson.
