@@ -1,127 +1,81 @@
-# Testing UUPS proxies
+# Account Abstraction Lesson 1: Introduction
 
-## UUPS Tests
+Welcome to the Account Abstraction course! In this lesson, we will introduce you to account abstraction and its importance in blockchain technology.
 
-In this lesson we're going to be writing our test suite which will enable us to really demonstrate how this upgradeability works in practice.
+Account abstraction is a fundamental concept of blockchain technology. It offers solutions to some of the common challenges faced by users and developers. In this introductory lesson, you will learn:
 
-Begin by creating the file `test/DeployAndUpgradeTest.t.sol`. We know the drill in setting this up by now!
+- The basic concept of account abstraction and its importance.
+- How account abstraction solves common problems related to private key management and transaction validation.
+- The two main implementations of account abstraction in Ethereum (`EntryPoint.sol`) and zkSync.
+- The role of alt mempools in handling user operations and transactions.
+- Optional components like the Signature Aggregator and Paymaster in Ethereum's `EntryPoint.sol` contract.
 
-```solidity
-// SPDX-License-Identifier: MIT
+## Problems Solved
 
-pragma solidity ^0.8.18;
+### Use of Private Keys for Signing Transactions
 
-import { Test } from "forge-std/Test.sol";
-import { DeployBox } from "../script/DeployBox.s.sol";
-import { UpgradeBox } from "../script/UpgradeBox.s.sol";
-import { BoxV1 } from "../src/BoxV1.sol";
-import { BoxV2 } from "../src/BoxV2.sol";
+Traditionally, users need to manage and use private keys to sign transactions. This can be annoying, confusing, and risky. Losing a private key means losing access to the account. Even worse, a stolen private key means that you've just lost all the value in that account. Account abstraction solves this problem by allowing users to sign transactions without using private keys. Instead, users can use a different type of key that is more user-friendly and secure. This simplifies the process of signing transactions and reduces the risk of losing access to an account, enhancing both security and user experience.
 
-contract DeployAndUpgradeTest is Test {
-  DeployBox public deployer;
-  UpgradeBox public upgrader;
-  address public OWNER = makeAddr("owner");
+What's more is that this new type of 'key' can be anything you can think of(as long is it can be coded). This means that you can use your phone, Google account, or even your fingerprint to sign transactions. You can even have a group of your friends collectively approve the data. The possibilities are endless.
 
-  address public proxy;
+### More Flexible Validation Options
 
-  function setUp() {
-    deployer = new DeployBox();
-    upgrader = new UpgradeBox();
-    proxy = deployer.run(); // currently points to BoxV1
-  }
-}
-```
+Another challenge is that traditional transactions are validated by the sender's private key. This means that only the owner of an account can sign and send a transaction from it. With account abstraction, there is more flexibility in how transactions are validated. This means that you can have others to foot the bill for the gas. Account abstraction addresses this by providing a more flexible and secure framework for transaction validation.
 
-This is a little more than boilerplate, but I trust your skills to be improving as we continue, so walking through each step granularly shouldn't be as necessary. In the above, we're simply importing many of the contracts we expect to be working with in our tests and then declaring and deploying them within our setUp function.
+## Two Entry Points
 
-Now we can write our test, we'll need to deploy BoxV2.
+The traditional Ethereum transactions consists of first the signing of the transaction by the sender's private key, and then sending it to an Ethereum node. The node verifies that the signature is valid and if so, adds it to its mempool for later inclusion in a block. Account Absctraction, as we have already mentioned add improvemnts to this process. There are two entry points that we need to understand - Ethereum's `EntryPoint.sol` and zkSync's native integration.
 
-```solidity
-function testUpgrades() public {
-  BoxV2 box2 = new BoxV2();
+### Ethereum – EntryPoint.sol
 
-  upgrader.upgradeBox(proxy, address(box2));
-}
-```
+Ethereum implements account abstraction using a smart contract called `EntryPoint.sol`. This contract acts as a gateway for handling user operations and transactions in a more flexible manner.
 
-Recall what our upgradeBox function is going within UpgradeBox.s.sol:
+If you're interested, you can checkout the code here: [EntryPoint.sol on GitHub](https://github.com/eth-infinitism/account-abstraction/blob/develop/contracts/core/EntryPoint.sol)
 
-```solidity
-function upgradeBox(
-  address proxyAddress,
-  address newBox
-) public returns (address) {
-  vm.startBroadcast();
-  BoxV1 proxy = BoxV1(proxyAddress);
-  proxy.upgradeTo(address(newBox));
-  vm.stopBroadcast();
+### zkSync – Natively Integrated
 
-  return address(proxy);
-}
-```
+zkSync, on the other hand, has account abstraction natively integrated into its codebase. This allows for seamless handling of transactions and operations without the need for additional contracts.
 
-This function is taking the proxy address and our new implementation address as parameters and calling the upgradeTo function.
+## Account Abstraction Uses Alt-Mempools
 
-Now, in our test, we can set an expected value and compare it against what version a call to the `version` function on our proxy will return.
+### User Operations (Off-Chain)
 
-```solidity
-function testUpgrades() public {
-  BoxV2 box2 = new BoxV2();
+In Ethereum, user operations are first sent off-chain. This means that the initial handling and validation occur outside the main blockchain network, reducing congestion and improving efficiency. In the above example, the user operation is signed with Google and is sent to the alt-mempool, which then sends it to the main blockchain network. The alt mempool is any nodes which are facilitating this operation. So the user is not sending their transaction to the Ethereum nodes.
 
-  upgrader.upgradeBox(proxy, address(box2));
+### Transactions and Gas Payments (On-Chain)
 
-  uint256 expectedValue = 2;
-  assertEq(expectedValue, BoxV2(proxy).version());
-}
-```
+Once validated, the user operations are sent on-chain as transactions. These transactions are executed and gas fees are paid on behalf of the user, directly from their account, by the alt-mempool nodes. This is managed through the `EntryPoint.sol` contract. From here, the user's smart contract essentially becomes their wallet. If a paymaster is not set up, the funds will be deducted from the account. Finally, the contract is deployed to the blockchain.
 
-It's best practice to split tests up as best one can, but let's check more here while we're at it. We added new function to BoxV2, let's ensure they work after our upgrade.
+### EntryPoint.sol Optional Add-ons
 
-```solidity
-function testUpgrades() public {
-  BoxV2 box2 = new BoxV2();
+The `EntryPoint.sol` contract also allows for optional add-ons, such as a Signature Aggregator and a Paymaster. These add-ons can be used to further optimize gas fees and improve user experience.
 
-  upgrader.upgradeBox(proxy, address(box2));
+#### Signature Aggregator
 
-  uint256 expectedValue = 2;
-  assertEq(expectedValue, BoxV2(proxy).version());
+An optional add-on to the EntryPoint.sol contract is the signature aggregator. This add-on lets you define multiple signatures to be aggregated and verified. This means that other users can sign transactions on the same wallet or multi-sign logic can be added, such as requiring multiple signatures before authorizing transactions.
 
-  BoxV2(proxy).setNumber(7);
-  assertEq(7, BoxV2(proxy).getNumber());
-}
-```
+Paymaster
+Another optional component is the pay master. It handles gas payments, allowing users to pay for transactions in various ways, not limited to the native cryptocurrency.
 
-You know what, I changed my mind, let's add one more simple test to verify the implementation we begin with.
+zkSync
 
-```solidity
-function testProxyStartAsBoxV1() public {
-  vm.expectRevert();
-  BoxV2(proxy).setNumber(7);
-}
-```
+Acts as an Alt-Mempool
+In zkSync, the alt-mempool nodes are also the zkSync nodes. This means that sending the transaction to the alt-mempool can be skipped. The reason zkSync can do this is because every account (e.g., MetaMask) is by default a smart contract account as it is automatically connected to a DefaultAccount.sol.
 
-We would expect the above to revert because BoxV1, on deployment, doesn't contain a setNumber function! Let's test these one at a time.
+By understanding these concepts, you'll have a solid foundation in account abstraction and its implementation in leading blockchain platforms like Ethereum and zkSync.
 
-```bash
-forge test --mt testProxyStartAsBoxV1
-```
+### Questions for Review
 
-We would expect this to pass if it reverts.
+Before we move one, here are some questions to help you review what we've covered so far:
 
-![UUPS Proxy Tests](./assets/uups-tests1.png)
+- What is account abstraction?
 
-Looks great! Our BoxV1 doesn't have the setNumber function. Now we can try our other test!
+- What are the two entry points in account abstraction?
 
-```bash
-forge test --mt testUpgrades
-```
+- What is a mempool
 
-![UUPS Proxy Tests](./assets/uups-tests2.png)
+- What are the two optional add-ons for EntryPoint.sol?
 
-### Wrap Up
+- What is the role of a pay master?
 
-Boom! We've successfully upgraded our upgradeable Box Protocol.
-
-I've included additional tests for this within the **[GitHub Repo](https://github.com/Cyfrin/foundry-upgrades-f23)** for this section, so don't hesitate to try and write your own and compare what you come up with versus the repo!
-
-In this section we'll be walking through one big example test, but I encourage you to try to write more, as always.
+- How does it work in Ethereum/zkSync? What's the difference between the two?
