@@ -1,122 +1,139 @@
-# Account Abstraction Lesson 12: Local Dev Unlocked
+# Account Abstraction Lesson 13: Test Validate UserOps
 
-Welcome back! We are on a roll now. We've almost got our scripts and test completed, but we need to do some refactoring. We will be doing this in order to properly sign our user operations. Let's get started.
+In this lesson, we are going to write another test called `testValidationOfUserOps`. We want to be able to do three things here:
 
----
+1. Sign `userOps`
+2. Call validate `userOps`
+3. Assert the return is correct
 
-## Refactor `generateSignedUserOperation`
-
-Picking up where we left off from lesson 11, we are going to have to do a work around for the sign it portion of our `generateSignedUserOperation` function.
-
-**<span style="color:red">SendPackedUserOp.s.sol</span>**
-
-```solidity
-// 3. Sign it
-(uint8 v, bytes32 r, bytes32 s) = vm.sign(config.account, digest);
-userOp.signature = abi.encodePacked(r, s, v); // Note the order
-return userOp;
-```
-
-Here's what we need to do in our refactored code.
-
-- Initialize our `v, r, s` as blank variables.
-- Create a variable for Anvil default key
-- Create an **if/else** statement.
-- If the `block.chainid` is 31337, which is Anvil, set v, r, s to `vm.sign(ANVIL_DEFAULT_KEY, digest)`.
-- Else, set it to `vm.sign(config.account, digest)`
-
-> ❗ **NOTE** You can get an Anvil key by running anvil in your terminal. There will be a list of private keys. Choose any one of them.
-
-This is what our refactored code should look like.
-
-```solidity
-// 3. Sign it
-uint8 v;
-bytes32 r;
-bytes32 s;
-uint256 ANVIL_DEFAULT_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-if (block.chainid == 31337) {
-    (v, r, s) = vm.sign(ANVIL_DEFAULT_KEY, digest);
-} else {
-    (v, r, s) = vm.sign(config.account, digest);
-}
-userOp.signature = abi.encodePacked(r, s, v); // Note the order
-return userOp;
-```
-
-### Set Anvil as Local Chain
-
-Since we are using a local chain, we need to do some refactoring over in HelperConfig. We'll need to replace `FOUNDRY_DEFAULT_WALLET` with `ANVIL_DEFAULT_ACCOUNT` in our state variables and in the `getOrCreateAnvilEthConfig` function.
-
-> ❗ **PROTIP** Just comment out the FOUNDRY_DEFAULT_WALLET variable, and add ANVIL_DEFAULT_ACCOUNT on a separate line.
-
-**<span style="color:red">HelperConfig.s.sol</span>**
-
-```solidity
-address constant ANVIL_DEFAULT_ACCOUNT = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-
-function getOrCreateAnvilEthConfig() public returns (NetworkConfig memory) {
-  if (localNetworkConfig.account != address(0)) {
-    return localNetworkConfig;
-  }
-
-  // deploy mocks
-  console2.log("Deploying mocks...");
-  vm.startBroadcast(ANVIL_DEFAULT_ACCOUNT);
-  EntryPoint entryPoint = new EntryPoint();
-  vm.stopBroadcast();
-
-  return
-    NetworkConfig({
-      entryPoint: address(entryPoint),
-      account: ANVIL_DEFAULT_ACCOUNT
-    });
-}
-```
-
-> ❗ **NOTE** Here we are using ANVIL_DEFAULT_ACCOUNT not ANVIL_DEFAULT_KEY.
+Let's get started!
 
 ---
 
-### Set localNetworkConfig
+## Arrange
 
-We need to do a bit more work in `getOrCreateAnvilEthConfig`. At the bottom of the function:
+In our test function, we can simply copy and paste the Arrange from `testRecoverSignedOp`.
 
-- set `localNetworkConfig` to `NetworkConfig`
-- return `localNetworkConfig`
-
-```solidity
-localNetworkConfig = NetworkConfig({
-  entryPoint: address(entryPoint),
-  usdc: address(erc20Mock),
-  account: ANVIL_DEFAULT_ACCOUNT,
-});
-return localNetworkConfig;
-```
-
-If not, our if statement would always be true and we'd be constantly deploying mocks.
-
-Now that we have Anvil set, we need to make a minor change over in our `DeployMinimal` script. We simply need to change the transfer of ownership from `msg.sender` to `config.account.` You will find it under `vm.Broadcast()`.
-
-- from: `minimalAccount.transferOwnership(msg.sender);`
-- to: `minimalAccount.transferOwnership(config.account);`
-
-**<span style="color:red">DeployMinimal.s.sol</span>**
+**<span style="color:red">MinimalAccountTest.t.sol</span>**
 
 ```solidity
-vm.startBroadcast(config.account);
-MinimalAccount minimalAccount = new MinimalAccount(config.entryPoint);
-minimalAccount.transferOwnership(config.account);
-vm.stopBroadcast();
-return (helperConfig, minimalAccount);
+function testValidationOfUserOps() public {
+  // Arrange
+  assertEq(usdc.balanceOf(address(minimalAccount)), 0);
+  address dest = address(usdc);
+  uint256 value = 0;
+  bytes memory functionData = abi.encodeWithSelector(
+    ERC20Mock.mint.selector,
+    address(minimalAccount),
+    AMOUNT
+  );
+  bytes memory executeCallData = abi.encodeWithSelector(
+    MinimalAccount.execute.selector,
+    dest,
+    value,
+    functionData
+  );
+  PackedUserOperation memory packedUserOp = sendPackedUserOp
+    .generateSignedUserOperation(executeCallData, helperConfig.getConfig());
+  bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint)
+    .getUserOpHash(packedUserOp);
+}
 ```
 
-Let's run our test again to see where we stand.
+### Act
+
+In our **Act**, we want to make sure that `validateUserOp` returns correctly. If you look back at this function in our `MinimalAccount`, you will notice that it can only be called by the `EntryPoint`. So, in our `vm.prank`, we are going to be the `EntryPoint`.
+
+You will also notice that it takes a `userOp`, `userOpHash`, and `missingAccountFunds`. We'll need to set this to our `validationData`. We already have `packedUserOp` and `userOperationHash` in our **Arrange**. We will need to add `missingAccountFunds` there as well. Let's make it a `uint256` and set it to 1e18 **(to simulate the amount of funds that are missing from the account)**. Lastly, we remember that our `SIG_VALIDATION_SUCCESS` = 0. So, we'll assume this will be the case in this test.
+
+```solidity
+uint256 missingAccountFunds = 1e18;
+
+// Act
+vm.prank(helperConfig.getConfig().entryPoint);
+uint256 validationData = minimalAccount.validateUserOp(packedUserOp, userOperationHash, missingAccountFunds);
+assertEq(validationData, 0);
+```
+
+With that, our function should now look like this.
+
+```solidity
+function testValidationOfUserOps() public {
+  // Arrange
+  assertEq(usdc.balanceOf(address(minimalAccount)), 0);
+  address dest = address(usdc);
+  uint256 value = 0;
+  bytes memory functionData = abi.encodeWithSelector(
+    ERC20Mock.mint.selector,
+    address(minimalAccount),
+    AMOUNT
+  );
+  bytes memory executeCallData = abi.encodeWithSelector(
+    MinimalAccount.execute.selector,
+    dest,
+    value,
+    functionData
+  );
+  PackedUserOperation memory packedUserOp = sendPackedUserOp
+    .generateSignedUserOperation(executeCallData, helperConfig.getConfig());
+  bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint)
+    .getUserOpHash(packedUserOp);
+  uint256 missingAccountFunds = 1e18;
+
+  // Act
+  vm.prank(helperConfig.getConfig().entryPoint);
+  uint256 validationData = minimalAccount.validateUserOp(
+    packedUserOp,
+    userOperationHash,
+    missingAccountFunds
+  );
+  assertEq(validationData, 0);
+}
+```
+
+Let's test it.
 
 ```bash
-forge test --mt testRecoverSignedOp -vvv
+forge test --mt testValidationOfUserOps -vvv
 ```
 
-**And it passed!!!**
+It passes! We are on a roll!
 
-This means that we are getting the correct signature on our user operations. Congratulations! Move on to the next lesson when you are ready.
+Now we know that we are getting the correct signatures and that our validation is working properly. Next, we get to see if our EntryPoint can execute commands. Before you move on, consider these review questions.
+
+---
+
+### Questions for Review
+
+<summary>1. What is the main objective of the testValidationOfUserOps?</summary>
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+```Solidity
+The main objective is to sign userOps, call validateUserOp, and assert that the return value is correct.
+
+```
+
+</details>
+
+<summary>2. Why do we set missingAccountFunds to 1e18?</summary>
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+It simulates the amount of funds that are missing from the account, which is required for the validateUserOp function.
+
+</details>
+
+<summary>3. What does the assertEq(validationData, 0) statement check for?</summary>
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+It checks that the validateUserOp function returns 0, indicating that the signature validation was successful.
+
+</details>
