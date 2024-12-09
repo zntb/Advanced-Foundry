@@ -1,18 +1,86 @@
-# Account Abstraction Lesson 16: Mid Session Recap
+# Account Abstraction Lesson 17: Live Demo on Arbitrum
 
-Summary of Our Account Abstraction Minimal Account Journey
-🎉 We've accomplished so much. Let's go over some of it. 🎉
+The time has come for us to deploy our code base. Let's run our deploy script - `DeployMinimal`.
 
-First, we created the MinimalAccount using account abstraction. This allows for flexible transaction validation, meaning anything can validate a transaction, not just a private key. This opens up a world of possibilities as we can code almost anything to sign transactions. The signed data is then sent to alt-mempool nodes. These nodes combine the data into a user operation and call handleOps on an EntryPoint contract.
+---
 
-🎉🎉🎉
+> ❗ **IMPORTANT** This demo is run on a real network, which requires real money. It's recommended just to follow along with the video, and focus more on the code and learning how to deploy to the mainnet.
 
-The EntryPoint contract is crucial because it handles the validation of the signature. If the validation is successful, the EntryPoint will call our account, and our account will then interact with other dapps. The main function that we focused on for this process is validateUserOperation. This function is key as it calls our custom logic, ensuring our transactions are validated correctly.
+> ❗ **NOTE** The hardcoded values are from the instructor. Your actual values may vary. As always, you can see up-to-date code in the repo.
 
-🎉🎉🎉
+🔥🔥🔥[Cyfrin Minimal Account Abstraction Repo](https://github.com/Cyfrin/minimal-account-abstraction)🔥🔥🔥
 
-We also wrote some helpful scripts to automate our processes. One of the highlights is the SendPackedUserOp script. This script allows us to generate a signed user operation and send it to the blockchain seamlessly.
+---
 
-🎉🎉🎉
+Run the following in your terminal.
 
-Overall, our journey has been exciting and productive, and we’ve learned a lot along the way. But we've still got a lot left to do. So, take a break. Take some time to reflect on our journey. Move on to the next lesson when you are ready.
+```bash
+forge script script/DeployMinimal.s.sol --rpc-url $ARBITRUM_RPC_URL --account smallmoney --broadcast --verify
+```
+
+We forgot to complete the `run` function in our `SendPackedUserOp` script. Let's do that now.
+
+---
+
+**<span style="color:red">SendPackedUserOp.s.sol</span>**
+
+```solidity
+// Add these imports
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { MinimalAccount } from "src/ethereum/MinimalAccount.sol";
+
+// run function
+function run() public {
+  // Setup
+  HelperConfig helperConfig = new HelperConfig();
+  address dest = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831; // Arbitrum mainnet USDC address
+  uint256 value = 0;
+
+  bytes memory functionData = abi.encodeWithSelector(
+    IERC20.approve.selector,
+    0x9EA9b0cc1919def1A3CfAEF4F7A66eE3c36F86fC,
+    1e18
+  );
+
+  bytes memory executeCalldata = abi.encodeWithSelector(
+    MinimalAccount.execute.selector,
+    dest,
+    value,
+    functionData
+  );
+
+  PackedUserOperation memory userOp = generateSignedUserOperation(
+    executeCalldata,
+    helperConfig.getConfig(),
+    0x03Ad95a54f02A40180D45D76789C448024145aaF
+  );
+  PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+  ops[0] = userOp;
+
+  // Send transaction
+  vm.startBroadcast();
+  IEntryPoint(helperConfig.getConfig().entryPoint).handleOps(
+    ops,
+    payable(helperConfig.getConfig().account)
+  );
+  vm.stopBroadcast();
+}
+```
+
+---
+
+> ❗ **NOTE** HelperConfig for arbitrum has already been set up off screen.
+
+---
+
+Now that we've got it set up, let's deploy our `SendPackedUserOp.s.sol` to Arbitrum.
+
+Run the following in your terminal.
+
+```bash
+forge script script/SendPackedUserOp.s.sol --rpc-url $ARBITRUM_RPC_URL --account smallmoney --broadcast -vvv
+```
+
+Congratulations! We've successfully made our first **account abstraction user operation call!**
+
+When you are ready, move on to the next lesson.
