@@ -1,64 +1,107 @@
-# Account Abstraction Lesson 13: Test Validate UserOps
+# Account Abstraction Lesson 14: Test EntryPoint
 
-In this lesson, we are going to write another test called `testValidationOfUserOps`. We want to be able to do three things here:
+Alright, we've got one more test to write. Then we will get to see how all this works on a real network. Along the way, we will:
 
-1. Sign `userOps`
-2. Call validate `userOps`
-3. Assert the return is correct
+- pay back the alt-mempool for covering our costs
+- get a random user to send our transaction
+- implement `handleUserOps()`
+- Complete a debugging challenge.
 
-Let's get started!
+Let's get into it!
 
 ---
 
-## Arrange
+## Pay Back Alt-mempool
 
-In our test function, we can simply copy and paste the Arrange from `testRecoverSignedOp`.
+Let's start by setting up our `testEntryPointCanExecuteCommands` function with **Arrange**, **Act** and **Assert**.
 
 **<span style="color:red">MinimalAccountTest.t.sol</span>**
 
 ```solidity
-function testValidationOfUserOps() public {
+function testEntryPointCanExecuteCommands() public {
   // Arrange
-  assertEq(usdc.balanceOf(address(minimalAccount)), 0);
-  address dest = address(usdc);
-  uint256 value = 0;
-  bytes memory functionData = abi.encodeWithSelector(
-    ERC20Mock.mint.selector,
-    address(minimalAccount),
-    AMOUNT
-  );
-  bytes memory executeCallData = abi.encodeWithSelector(
-    MinimalAccount.execute.selector,
-    dest,
-    value,
-    functionData
-  );
-  PackedUserOperation memory packedUserOp = sendPackedUserOp
-    .generateSignedUserOperation(executeCallData, helperConfig.getConfig());
-  bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint)
-    .getUserOpHash(packedUserOp);
+  // Act
+  // Assert
 }
 ```
 
-### Act
-
-In our **Act**, we want to make sure that `validateUserOp` returns correctly. If you look back at this function in our `MinimalAccount`, you will notice that it can only be called by the `EntryPoint`. So, in our `vm.prank`, we are going to be the `EntryPoint`.
-
-You will also notice that it takes a `userOp`, `userOpHash`, and `missingAccountFunds`. We'll need to set this to our `validationData`. We already have `packedUserOp` and `userOperationHash` in our **Arrange**. We will need to add `missingAccountFunds` there as well. Let's make it a `uint256` and set it to 1e18 **(to simulate the amount of funds that are missing from the account)**. Lastly, we remember that our `SIG_VALIDATION_SUCCESS` = 0. So, we'll assume this will be the case in this test.
+For starters, we can simply grab all of **Assert** from `testValidationOfUserOps`, except for the last line - `uint256 missingAccountFunds = 1e18;`.
 
 ```solidity
-uint256 missingAccountFunds = 1e18;
+// Arrange
+assertEq(usdc.balanceOf(address(minimalAccount)), 0);
+address dest = address(usdc);
+uint256 value = 0;
+bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(minimalAccount), AMOUNT);
+bytes memory executeCallData =
+    abi.encodeWithSelector(MinimalAccount.execute.selector, dest, value, functionData);
+PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
+    executeCallData, helperConfig.getConfig());
+bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
+```
+
+In the previous lesson, we added `missingAccountfunds` to simulate the amount of funds that are missing from the account. We know that the alt-mempool initially covers these costs. Now we need to pay them back. To do this, we will use `vm.deal(address(minimalAccount), 1e18);`.
+
+```solidity
+// Arrange
+assertEq(usdc.balanceOf(address(minimalAccount)), 0);
+address dest = address(usdc);
+uint256 value = 0;
+bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(minimalAccount), AMOUNT);
+bytes memory executeCallData =
+    abi.encodeWithSelector(MinimalAccount.execute.selector, dest, value, functionData);
+PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
+    executeCallData, helperConfig.getConfig());
+bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
+vm.deal(address(minimalAccount), 1e18);
+```
+
+### Have Random User Send Transaction
+
+In our **Act**, we will use vm.prank to be a random user. This means that anyone can send our transaction as long as we sign it.
+
+```solidity
+// Act
+vm.prank(randomuser);
+```
+
+Additionally, if you go into `handleOps` or the `EntryPoint` you'll see that it takes a `PackedUserOperation[] calldata ops` array and `payable beneficiary`.
+
+**<span style="color:red">EntryPoint.sol</span>**
+
+```solidity
+/// @inheritdoc IEntryPoint
+function handleOps(
+    PackedUserOperation[] calldata ops,
+    address payable beneficiary
+)
+```
+
+In our case, the beneficiary will be the `randomuser`. This means that we will be paying a random person to send our transaction. To do all of this, we'll need to set the `PackedUserOperation` array from `handleOps` in **Arrange**. Also in **Arrange**, copy `IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp)` and refactor it for `handleOps()` instead of `getUserOpHash()`. Then add it to our **Act**.
+
+**<span style="color:red">MinimalAccountTest.t.sol</span>**
+
+```solidity
+PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+ops[0] = packedUserOp;
 
 // Act
-vm.prank(helperConfig.getConfig().entryPoint);
-uint256 validationData = minimalAccount.validateUserOp(packedUserOp, userOperationHash, missingAccountFunds);
-assertEq(validationData, 0);
+vm.prank(randomuser);
+IEntryPoint(helperConfig.getConfig().entryPoint).handleOps(ops, payable(randomuser));
 ```
 
-With that, our function should now look like this.
+> ❗ **NOTE** We no longer need userOperationHash in our Assert because in our handleUserOps. You can comment it out.
+
+Now we can move on to our Assert, which is exactly the same as in `testOwnerCanExecuteCommands`. Just copy and paste it.
 
 ```solidity
-function testValidationOfUserOps() public {
+assertEq(usdc.balanceOf(address(minimalAccount)), AMOUNT);
+```
+
+**Our completed code should look like this: **
+
+```solidity
+function testEntryPointCanExecuteCommands() public {
   // Arrange
   assertEq(usdc.balanceOf(address(minimalAccount)), 0);
   address dest = address(usdc);
@@ -76,64 +119,36 @@ function testValidationOfUserOps() public {
   );
   PackedUserOperation memory packedUserOp = sendPackedUserOp
     .generateSignedUserOperation(executeCallData, helperConfig.getConfig());
-  bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint)
-    .getUserOpHash(packedUserOp);
-  uint256 missingAccountFunds = 1e18;
+  //bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
+  vm.deal(address(minimalAccount), 1e18);
+
+  PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+  ops[0] = packedUserOp;
 
   // Act
-  vm.prank(helperConfig.getConfig().entryPoint);
-  uint256 validationData = minimalAccount.validateUserOp(
-    packedUserOp,
-    userOperationHash,
-    missingAccountFunds
+  vm.prank(randomuser);
+  IEntryPoint(helperConfig.getConfig().entryPoint).handleOps(
+    ops,
+    payable(randomuser)
   );
-  assertEq(validationData, 0);
+
+  // Assert
+  assertEq(usdc.balanceOf(address(minimalAccount)), AMOUNT);
 }
 ```
 
-Let's test it.
+Let's test it!
 
 ```bash
-forge test --mt testValidationOfUserOps -vvv
+forge test --mt testEntryPointCanExecuteCommands -vvv
 ```
 
-It passes! We are on a roll!
-
-Now we know that we are getting the correct signatures and that our validation is working properly. Next, we get to see if our EntryPoint can execute commands. Before you move on, consider these review questions.
+And..... It failed. No worries, we need some debugging practice anyway.
 
 ---
 
-### Questions for Review
+### CHALLENGE TIME
 
-<summary>1. What is the main objective of the testValidationOfUserOps?</summary>
+We are going to tackle this together. But first, try it out yourself. Use the debugging skills that we have learned and used throughout the course. When you get ready, move on to the next lesson.
 
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-```Solidity
-The main objective is to sign userOps, call validateUserOp, and assert that the return value is correct.
-
-```
-
-</details>
-
-<summary>2. Why do we set missingAccountFunds to 1e18?</summary>
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-It simulates the amount of funds that are missing from the account, which is required for the validateUserOp function.
-
-</details>
-
-<summary>3. What does the assertEq(validationData, 0) statement check for?</summary>
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-It checks that the validateUserOp function returns 0, indicating that the signature validation was successful.
-
-</details>
+> ❗ **PROTIP** ChatGPT is likely not the answer.
