@@ -1,154 +1,149 @@
-# Account Abstraction Lesson 14: Test EntryPoint
+# Account Abstraction Lesson 15: Advanced Debugging
 
-Alright, we've got one more test to write. Then we will get to see how all this works on a real network. Along the way, we will:
-
-- pay back the alt-mempool for covering our costs
-- get a random user to send our transaction
-- implement `handleUserOps()`
-- Complete a debugging challenge.
-
-Let's get into it!
+We left off of our previous lesson with a debugging challenge. If you weren't able to solve it, no worries, we are going to do it together in this lesson. If you were able to solve it, great work. You should still follow along with this lesson.
 
 ---
 
-## Pay Back Alt-mempool
+## Degug with Forge
 
-Let's start by setting up our `testEntryPointCanExecuteCommands` function with **Arrange**, **Act** and **Assert**.
+Forge has some great debugging tools. Let's check them out. Run the following in your terminal.
 
-**<span style="color:red">MinimalAccountTest.t.sol</span>**
+```bash
+forge test --debug testEntryPointCanExecuteCommands -vvv
+```
+
+> ❗ **NOTE** If you aren't following along with the video, I highly recommend that you do so for this part of the lesson.
+
+Simply hit shift G, and you will be taken to where the test reverted. You'll see that the line of code where the issue is highlighted.
+We know that the issue is likely in the `handleOps`, as this is the part that we recently refactored in this line. Now we have to find the line in the `handleOps` code that actually failed. Start hitting the J to walk back through the code base. It may take a few seconds, but eventually you should see this:
+
+### Getting the Correct Sender
+
+Let's inspect this line a bit further.
+
+---
 
 ```solidity
-function testEntryPointCanExecuteCommands() public {
-  // Arrange
-  // Act
-  // Assert
+try IAccount(sender).validateUserOp{gas: verificationGasLimit}(op, opInfo.userOpHash, missingAccountFunds)
+```
+
+---
+
+We already know that `validateUserOp` is fine because those tests have already passed. However, you may notice that `IAccount` takes on `sender`. This may be the issue we should be sending our account, `minimalAccount`.
+
+Let's quit the debugger by pressing q and go back into `SendPackedUserOp.s.sol`. In the `generateSignedUserOperation` function, you'll notice `config.account` in a couple of places. Let's change this to `minimalAccount`.
+
+- pass `address minimalAccount` to `generateSignedUserOp`
+- change `config.account` to `minimalAccount` in `vm.getNonce`
+- change `config.account` to `minimalAccount` in `_generateUnsignedUserOperation`
+
+Our updated part of our function will look like this:
+
+**<span style="color:red">SendPackedUserOp.s.sol</span>**
+
+```solidity
+function generateSignedUserOperation(
+  bytes memory callData,
+  HelperConfig.NetworkConfig memory config,
+  address minimalAccount
+) public view returns (PackedUserOperation memory) {
+  // 1. Generate the unsigned data
+  uint256 nonce = vm.getNonce(minimalAccount) - 1;
+  PackedUserOperation memory userOp = _generateUnsignedUserOperation(
+    callData,
+    minimalAccount,
+    nonce
+  );
 }
 ```
 
-For starters, we can simply grab all of **Assert** from `testValidationOfUserOps`, except for the last line - `uint256 missingAccountFunds = 1e18;`.
+### Adjusting Our Tests
 
-```solidity
-// Arrange
-assertEq(usdc.balanceOf(address(minimalAccount)), 0);
-address dest = address(usdc);
-uint256 value = 0;
-bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(minimalAccount), AMOUNT);
-bytes memory executeCallData =
-    abi.encodeWithSelector(MinimalAccount.execute.selector, dest, value, functionData);
-PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
-    executeCallData, helperConfig.getConfig());
-bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
-```
+Because of our update, we'll have to make adjustments to any other test or function that used `generateSignedUserOperation`. Let's start with our tests. Add `address (minimalAccount)` to where necessary.
 
-In the previous lesson, we added `missingAccountfunds` to simulate the amount of funds that are missing from the account. We know that the alt-mempool initially covers these costs. Now we need to pay them back. To do this, we will use `vm.deal(address(minimalAccount), 1e18);`.
+- `testEntryPointCanExecuteCommands`
+- `testValidationOfUserOps`
+- `testRecoverSignedOp`
 
-```solidity
-// Arrange
-assertEq(usdc.balanceOf(address(minimalAccount)), 0);
-address dest = address(usdc);
-uint256 value = 0;
-bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(minimalAccount), AMOUNT);
-bytes memory executeCallData =
-    abi.encodeWithSelector(MinimalAccount.execute.selector, dest, value, functionData);
-PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
-    executeCallData, helperConfig.getConfig());
-bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
-vm.deal(address(minimalAccount), 1e18);
-```
-
-### Have Random User Send Transaction
-
-In our **Act**, we will use vm.prank to be a random user. This means that anyone can send our transaction as long as we sign it.
-
-```solidity
-// Act
-vm.prank(randomuser);
-```
-
-Additionally, if you go into `handleOps` or the `EntryPoint` you'll see that it takes a `PackedUserOperation[] calldata ops` array and `payable beneficiary`.
-
-**<span style="color:red">EntryPoint.sol</span>**
-
-```solidity
-/// @inheritdoc IEntryPoint
-function handleOps(
-    PackedUserOperation[] calldata ops,
-    address payable beneficiary
-)
-```
-
-In our case, the beneficiary will be the `randomuser`. This means that we will be paying a random person to send our transaction. To do all of this, we'll need to set the `PackedUserOperation` array from `handleOps` in **Arrange**. Also in **Arrange**, copy `IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp)` and refactor it for `handleOps()` instead of `getUserOpHash()`. Then add it to our **Act**.
+Look in **Arrange** of the above test and make your change in `packedUserOp` Your updated line of code should resemble the one below.
 
 **<span style="color:red">MinimalAccountTest.t.sol</span>**
 
-```solidity
-PackedUserOperation[] memory ops = new PackedUserOperation[](1);
-ops[0] = packedUserOp;
+---
 
-// Act
-vm.prank(randomuser);
-IEntryPoint(helperConfig.getConfig().entryPoint).handleOps(ops, payable(randomuser));
+```solidity
+PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
+    executeCallData, helperConfig.getConfig(), address(minimalAccount));
 ```
 
-> ❗ **NOTE** We no longer need userOperationHash in our Assert because in our handleUserOps. You can comment it out.
+---
 
-Now we can move on to our Assert, which is exactly the same as in `testOwnerCanExecuteCommands`. Just copy and paste it.
+### Getting the Right Nonce
+
+We'll need to make one more change in order for our test to pass. Go back to `SendPackedUserOp`. In the `generateSignedUserOperation`, We want getNonce to be decremented by 1 for the purpose of our test.
+
+- `uint256 nonce = vm.getNonce(minimalAccount) - 1;`
+
+This will give us the last successful transaction, rather than the next one in the sequence.
+
+**<span style="color:red">SendPackedUserOp.s.sol</span>**
+
+---
 
 ```solidity
-assertEq(usdc.balanceOf(address(minimalAccount)), AMOUNT);
-```
-
-**Our completed code should look like this: **
-
-```solidity
-function testEntryPointCanExecuteCommands() public {
-  // Arrange
-  assertEq(usdc.balanceOf(address(minimalAccount)), 0);
-  address dest = address(usdc);
-  uint256 value = 0;
-  bytes memory functionData = abi.encodeWithSelector(
-    ERC20Mock.mint.selector,
-    address(minimalAccount),
-    AMOUNT
-  );
-  bytes memory executeCallData = abi.encodeWithSelector(
-    MinimalAccount.execute.selector,
-    dest,
-    value,
-    functionData
-  );
-  PackedUserOperation memory packedUserOp = sendPackedUserOp
-    .generateSignedUserOperation(executeCallData, helperConfig.getConfig());
-  //bytes32 userOperationHash = IEntryPoint(helperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
-  vm.deal(address(minimalAccount), 1e18);
-
-  PackedUserOperation[] memory ops = new PackedUserOperation[](1);
-  ops[0] = packedUserOp;
-
-  // Act
-  vm.prank(randomuser);
-  IEntryPoint(helperConfig.getConfig().entryPoint).handleOps(
-    ops,
-    payable(randomuser)
+function generateSignedUserOperation(
+  bytes memory callData,
+  HelperConfig.NetworkConfig memory config,
+  address minimalAccount
+) public view returns (PackedUserOperation memory) {
+  // 1. Generate the unsigned data
+  uint256 nonce = vm.getNonce(minimalAccount) - 1;
+  PackedUserOperation memory userOp = _generateUnsignedUserOperation(
+    callData,
+    minimalAccount,
+    nonce
   );
 
-  // Assert
-  assertEq(usdc.balanceOf(address(minimalAccount)), AMOUNT);
+  //rest of code
 }
 ```
 
-Let's test it!
+---
+
+Run the test again and it should pass.
 
 ```bash
 forge test --mt testEntryPointCanExecuteCommands -vvv
 ```
 
-And..... It failed. No worries, we need some debugging practice anyway.
+Before we move on, take a look at the review questions. Move on to the next lesson when you are ready.
 
 ---
 
-### CHALLENGE TIME
+### Questions for Review
 
-We are going to tackle this together. But first, try it out yourself. Use the debugging skills that we have learned and used throughout the course. When you get ready, move on to the next lesson.
+<summary>1. Why was address minimalAccount added as a parameter to the generateSignedUserOperation function?</summary>
 
-> ❗ **PROTIP** ChatGPT is likely not the answer.
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+```Solidity
+It was added to ensure that the correct account is used when generating the signed user operation. This change allows the function to specifically target the minimalAccount.
+```
+
+</details>
+
+<summary>2. What modification was made to the vm.getNonce function in the generateSignedUserOperation function?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+It was modified to subtract 1 from the nonce value. This change ensures that the function retrieves the last successful transaction rather than the next one in the sequence.
+
+</details>
