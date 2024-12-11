@@ -1,106 +1,159 @@
-# Account Abstraction Lesson 18: zkSync Setup
+# Account Abstraction Lesson 19: IAccount
 
-Welcome to the beginning of our journey with **account abstraction** on **zkSync**. One of the main differences that you'll immediately notice is that we won't need to worry about alt-mempools, as zkSync has native account abstraction. Additionally, there isn't an EntryPoint.sol. Transactions go directly to your contract. Here is a description:
+Now that we've got our functions, let's take a look at them to understand what they do.
 
----
+> ❗ **NOTE** From this point, we will be updating `Transaction calldata _transaction` to `Transaction memory _transaction` when it is passed into our function as a parameter.
 
-**zkSync Account Flow**
-
-## Overview of ZK System Contracts
-
-To get started, we are going to install Cyfrin Foundry Era Contracts. This is a mirror of the zksync system contracts. We will be using them for the beginning of our learning journey.
-
-> ❗ **IMPORTANT** Once the era-contracts GitHub repo releases a library edition, we will recommend people to use that instead.
-
-```bash
-forge install Cyfrin/foundry-era-contracts@v0.0.3 --no-commit
-```
-
-Go ahead and open `IAccount.sol` and `DefaultAccount.sol`. Be sure that you are in _**foundry-era-contracts**_ and not _**account-abstraction**_.
-
-### Default Accounts
-
-In Ethereum, we have two types of wallets.
-
-- **EOA** like Metamask
-- **Smart Contract** like our account contract that we built
-
-On the other hand, in zkSync EOAs are smart contracts. Thus, all smart contract accounts in zk are setup as default accounts. Let's take a look.
-
-1. Grab your wallet address from Metamask etc...
-2. [Click here to go to zkSync Era Block Explorer.](https://sepolia.explorer.zksync.io/)
-3. Paste your address into the search bar
-4. Follow along with the video from 4:00
-
-**Should look something like this.**
-
-### IAccount Interface
-
-In IAccount we can see the interface that all wallets/EOAs follow.
-
-- `validateTransaction`
-- `executeTransaction`
-- `executeTransactionFromOutside`
-- `prepareForPaymaster`
-
-Take a moment to look over the contract to become more familiar with what it does. Don't worry if you don't completely understand everything, as we will be learning it together.
+## Validate Transaction
 
 ---
-
-### ZK Minimal Account
-
-Go into zksync folder in your src. Create a new file and call it `ZkMinimalAccount.sol`. First, we need to:
-
-- import `IAccount.sol`
-- import `Transaction` from `MemoryTransactionHelper.sol`
-- set up our contract to inherit `IAccount`
-- Copy and paste functions from `IAccount` into our contract
 
 ```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+function validateTransaction(
+  bytes32 _txHash,
+  bytes32 _suggestedSignedHash,
+  Transaction memory _transaction
+) external payable returns (bytes4 magic) {}
+```
 
-import { IAccount } from "lib/foundry-era-contracts/src/system-contracts/contracts/interfaces/IAccount.sol";
-import { Transaction } from "lib/foundry-era-contracts/src/system-contracts/contracts/libraries/MemoryTransactionHelper.sol";
+---
 
-contract ZkMinimalAccount is IAccount {
-  function validateTransaction(
-    bytes32 _txHash,
-    bytes32 _suggestedSignedHash,
-    Transaction calldata _transaction
-  ) external payable returns (bytes4 magic) {}
+You may have noticed that it is similar to the validateUserOp function in our MinimalAccount.sol that we built for Ethereum. On Ethereum, there are user operations, but zkSync just has transactions. Just like we had a `PackedUserOp` struct before, now we have a `Transaction` struct. This can be found in `MemoryTransactionHelper.sol` For your convenience, I've added it below. Click to open it and read through it.
 
-  function executeTransaction(
-    bytes32 _txHash,
-    bytes32 _suggestedSignedHash,
-    Transaction calldata _transaction
-  ) external payable {}
+---
 
-  function executeTransactionFromOutside(
-    Transaction calldata _transaction
-  ) external payable;
+<details>
 
-  function payForTransaction(
-    bytes32 _txHash,
-    bytes32 _suggestedSignedHash,
-    Transaction calldata _transaction
-  ) external payable {}
+**<summary><span style="color:red">MemoryTransactionHelper.sol</span></summary>**
 
-  function prepareForPaymaster(
-    bytes32 _txHash,
-    bytes32 _possibleSignedHash,
-    Transaction calldata _transaction
-  ) external payable {}
+```solidity
+/// @notice Structure used to represent a zkSync transaction.
+struct Transaction {
+  // The type of the transaction.
+  uint256 txType;
+  // The caller.
+  uint256 from;
+  // The callee.
+  uint256 to;
+  // The gasLimit to pass with the transaction.
+  // It has the same meaning as Ethereum's gasLimit.
+  uint256 gasLimit;
+  // The maximum amount of gas the user is willing to pay for a byte of pubdata.
+  uint256 gasPerPubdataByteLimit;
+  // The maximum fee per gas that the user is willing to pay.
+  // It is akin to EIP1559's maxFeePerGas.
+  uint256 maxFeePerGas;
+  // The maximum priority fee per gas that the user is willing to pay.
+  // It is akin to EIP1559's maxPriorityFeePerGas.
+  uint256 maxPriorityFeePerGas;
+  // The transaction's paymaster. If there is no paymaster, it is equal to 0.
+  uint256 paymaster;
+  // The nonce of the transaction.
+  uint256 nonce;
+  // The value to pass with the transaction.
+  uint256 value;
+  // In the future, we might want to add some
+  // new fields to the struct. The `txData` struct
+  // is to be passed to account and any changes to its structure
+  // would mean a breaking change to these accounts. In order to prevent this,
+  // we should keep some fields as "reserved".
+  // It is also recommended that their length is fixed, since
+  // it would allow easier proof integration (in case we will need
+  // some special circuit for preprocessing transactions).
+  uint256[4] reserved;
+  // The transaction's calldata.
+  bytes data;
+  // The signature of the transaction.
+  bytes signature;
+  // The properly formatted hashes of bytecodes that must be published on L1
+  // with the inclusion of this transaction. Note, that a bytecode has been published
+  // before, the user won't pay fees for its republishing.
+  bytes32[] factoryDeps;
+  // The input to the paymaster.
+  bytes paymasterInput;
+  // Reserved dynamic type for the future use-case. Using it should be avoided,
+  // But it is still here, just in case we want to enable some additional functionality.
+  bytes reservedDynamic;
 }
 ```
 
-Now we have our **ZK Minimal Account** set up. Things are starting to get exciting! Let's take a moment to review. When you are ready, move on to the next lesson.
+</details>
+
+When we send an Account Abstraction transaction through zkSync, the `Transaction` struct will essentially be populated. This will be our focus for now. The following parameters we won't worry about, for now. But here is the gist of what they do.
+
+- `_txHash` = The hash of the transaction to be used in the explorer
+- `_suggestedSignedHash` = The hash of the transaction is signed by EOAs
+
+For now, let's consider `returns (bytes4 magic)` as a bool. For example, if we wanted it to return true we could just add the following into our function.
+
+---
+
+```solidity
+returns (bytes4 magic)
+{
+    return IAccount.validateTransaction.selector;
+}
+```
+
+---
+
+### Execute Transaction
+
+```solidity
+function executeTransaction(
+  bytes32 _txHash,
+  bytes32 _suggestedSignedHash,
+  Transaction memory _transaction
+) external payable {}
+```
+
+---
+
+I know what you're thinking. "This is similar to the `execute` function from `MinimalAccount`." And it is. Quite similar except no `EntryPoint`.
+
+---
+
+```solidity
+function executeTransactionFromOutside(
+  Transaction memory _transaction
+) external payable {}
+```
+
+---
+
+Essentially, this would be called if someone else wanted to execute a transaction. It will need to be validated.
+
+1. You sign a transaction.
+2. You send the signed transaction to a friend.
+3. Friend can send it by calling `executeTransactionFromOutside`.
+
+---
+
+### Pay For Transaction and Prepare For Paymaster
+
+The `payForTransaction` is similar to `_payPreFund`. This is where we state who will be paying for the transactions.
+
+---
+
+```solidity
+function payForTransaction(
+  bytes32 _txHash,
+  bytes32 _suggestedSignedHash,
+  Transaction memory _transaction
+) external payable {}
+```
+
+`prepareForPaymaster` will be called before `payForTransaction` if you have a paymaster, another person or entity who will be paying for the transactions.
+
+This lesson gave us a gist of what our IAccount interface will do. Take a moment to review and reflect. Move on to the next lesson when you are ready.
 
 ---
 
 ### Questions for Review
 
-<summary>1. What is the main difference between zkSync and Ethereum regarding account abstraction?</summary>
+---
+
+<summary>1. How is the validateTransaction function in zkSync similar to the validateUserOp function in Ethereum?</summary>
 
 ---
 
@@ -109,12 +162,12 @@ Now we have our **ZK Minimal Account** set up. Things are starting to get exciti
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
 ```Solidity
-zkSync has native account abstraction, which means there is no need for alt-mempools or an EntryPoint.sol. Transactions go directly to your contract.
+Both functions are used to validate transactions or user operations. In zkSync, the Transaction struct is used instead of the PackedUserOp struct in Ethereum.
 ```
 
 </details>
 
-<summary>2. How are EOAs different in zkSync compared to Ethereum?</summary>
+<summary>2.  What is the role of the executeTransactionFromOutside function?</summary>
 
 ---
 
@@ -122,11 +175,13 @@ zkSync has native account abstraction, which means there is no need for alt-memp
 
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
-In zkSync, EOAs are smart contracts.
+```Solidity
+This function allows someone else to execute a transaction that has been signed by the original sender.
+```
 
 </details>
 
-<summary>3. What are the 4 functions of the IAccount interface?</summary>
+<summary>3. When is the prepareForPaymaster function called?</summary>
 
 ---
 
@@ -134,9 +189,8 @@ In zkSync, EOAs are smart contracts.
 
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
-- validateTransaction
-- executeTransaction
-- executeTransactionFromOutside
-- prepareForPaymaster
+```Solidity
+It is called before the payForTransaction function if there is a paymaster involved. A paymaster is another person or entity who will be paying for the transactions.
+```
 
 </details>
