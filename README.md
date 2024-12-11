@@ -1,151 +1,69 @@
-# Account Abstraction Lesson 19: IAccount
+# Account Abstraction Lesson 20: System Contracts
 
-Now that we've got our functions, let's take a look at them to understand what they do.
+We are rolling along our journey into zkSync account abstraction quite nicely. In this lesson, we are going to:
 
-> ❗ **NOTE** From this point, we will be updating `Transaction calldata _transaction` to `Transaction memory _transaction` when it is passed into our function as a parameter.
+- learn the phases of sending an account abstraction transaction
+- become more familiar with system contracts and their importance
 
-## Validate Transaction
+Let's get it!
 
 ---
+
+## Sending Transactions
+
+There are essentially two phases to send an account abstraction transaction.
+
+**Phase 1: Validation**
+
+1. The user sends the transaction to the "zkSync API client" (sort of a "light node").
+2. The zkSync API client checks to see that the nonce is unique by querying the `NonceHolder` system contract.
+3. The zkSync API client calls `validateTransaction`, which MUST update the nonce.
+4. The zkSync API client checks the nonce is updated.
+5. The zkSync API client calls `payForTransaction`, or `prepareForPaymaster` & `validateAndPayForPaymasterTransaction`.
+6. The zkSync API client verifies that the bootloader gets paid.
+
+**Phase 2: Execution**
+
+1. The zkSync API client passes the validated transaction to the main node / sequencer (as of today, they are the same).
+2. The main node calls `executeTransaction`.
+3. If a paymaster was used, the `postTransaction` is called.
+
+---
+
+### `ContractDeployer` System Contract
+
+A system contract contains smart contracts that are deployed on zkSync by default. Let's take a look at one of the most important ones - `ContractDeployer`.
+
+- Go back to [zkSync Era Block Explorer](https://sepolia.explorer.zksync.io/)
+
+- Copy this address into the search bar.
 
 ```solidity
-function validateTransaction(
-  bytes32 _txHash,
-  bytes32 _suggestedSignedHash,
-  Transaction memory _transaction
-) external payable returns (bytes4 magic) {}
+0x0000000000000000000000000000000000008006;
 ```
 
+- You should see **ContractDeployer**.
+
+Scroll down a bit and click on the contract tab. You should then be able to see `ContractDeployer.sol` along with many other zkSync contracts. Essentially, the ContractDeployer governs other contracts. It is a system contract that is responsible:
+
+- for deploying other smart contracts on zkSync.
+- for generating the address of the deployed smart contract.
+- incrementing the deployment nonce.
+- making sure that the constructor is never called twice in a contract.
+
+On Ethereum, we simply need to send a transaction containing the compiled code of a smart contract. However, things are much different on zkSync. Here, a sender will actually have to call a function on ContractDeployer. Then the function will create a smart contract. As a result, we'll have to do things a bit differently in our terminal.
+
+For example: on Ethereum we can simply run `forge create` in our terminal. In zkSync we'll need to do this:
+
 ---
 
-You may have noticed that it is similar to the validateUserOp function in our MinimalAccount.sol that we built for Ethereum. On Ethereum, there are user operations, but zkSync just has transactions. Just like we had a `PackedUserOp` struct before, now we have a `Transaction` struct. This can be found in `MemoryTransactionHelper.sol` For your convenience, I've added it below. Click to open it and read through it.
-
----
-
-<details>
-
-**<summary><span style="color:red">MemoryTransactionHelper.sol</span></summary>**
-
-```solidity
-/// @notice Structure used to represent a zkSync transaction.
-struct Transaction {
-  // The type of the transaction.
-  uint256 txType;
-  // The caller.
-  uint256 from;
-  // The callee.
-  uint256 to;
-  // The gasLimit to pass with the transaction.
-  // It has the same meaning as Ethereum's gasLimit.
-  uint256 gasLimit;
-  // The maximum amount of gas the user is willing to pay for a byte of pubdata.
-  uint256 gasPerPubdataByteLimit;
-  // The maximum fee per gas that the user is willing to pay.
-  // It is akin to EIP1559's maxFeePerGas.
-  uint256 maxFeePerGas;
-  // The maximum priority fee per gas that the user is willing to pay.
-  // It is akin to EIP1559's maxPriorityFeePerGas.
-  uint256 maxPriorityFeePerGas;
-  // The transaction's paymaster. If there is no paymaster, it is equal to 0.
-  uint256 paymaster;
-  // The nonce of the transaction.
-  uint256 nonce;
-  // The value to pass with the transaction.
-  uint256 value;
-  // In the future, we might want to add some
-  // new fields to the struct. The `txData` struct
-  // is to be passed to account and any changes to its structure
-  // would mean a breaking change to these accounts. In order to prevent this,
-  // we should keep some fields as "reserved".
-  // It is also recommended that their length is fixed, since
-  // it would allow easier proof integration (in case we will need
-  // some special circuit for preprocessing transactions).
-  uint256[4] reserved;
-  // The transaction's calldata.
-  bytes data;
-  // The signature of the transaction.
-  bytes signature;
-  // The properly formatted hashes of bytecodes that must be published on L1
-  // with the inclusion of this transaction. Note, that a bytecode has been published
-  // before, the user won't pay fees for its republishing.
-  bytes32[] factoryDeps;
-  // The input to the paymaster.
-  bytes paymasterInput;
-  // Reserved dynamic type for the future use-case. Using it should be avoided,
-  // But it is still here, just in case we want to enable some additional functionality.
-  bytes reservedDynamic;
-}
+```bash
+forge create --zksync --legacy
 ```
 
-</details>
+If you'd like to [learn more about these system contracts, click here.](https://docs.zksync.io/build/developer-reference/era-contracts/system-contracts)
 
-When we send an Account Abstraction transaction through zkSync, the `Transaction` struct will essentially be populated. This will be our focus for now. The following parameters we won't worry about, for now. But here is the gist of what they do.
-
-- `_txHash` = The hash of the transaction to be used in the explorer
-- `_suggestedSignedHash` = The hash of the transaction is signed by EOAs
-
-For now, let's consider `returns (bytes4 magic)` as a bool. For example, if we wanted it to return true we could just add the following into our function.
-
----
-
-```solidity
-returns (bytes4 magic)
-{
-    return IAccount.validateTransaction.selector;
-}
-```
-
----
-
-### Execute Transaction
-
-```solidity
-function executeTransaction(
-  bytes32 _txHash,
-  bytes32 _suggestedSignedHash,
-  Transaction memory _transaction
-) external payable {}
-```
-
----
-
-I know what you're thinking. "This is similar to the `execute` function from `MinimalAccount`." And it is. Quite similar except no `EntryPoint`.
-
----
-
-```solidity
-function executeTransactionFromOutside(
-  Transaction memory _transaction
-) external payable {}
-```
-
----
-
-Essentially, this would be called if someone else wanted to execute a transaction. It will need to be validated.
-
-1. You sign a transaction.
-2. You send the signed transaction to a friend.
-3. Friend can send it by calling `executeTransactionFromOutside`.
-
----
-
-### Pay For Transaction and Prepare For Paymaster
-
-The `payForTransaction` is similar to `_payPreFund`. This is where we state who will be paying for the transactions.
-
----
-
-```solidity
-function payForTransaction(
-  bytes32 _txHash,
-  bytes32 _suggestedSignedHash,
-  Transaction memory _transaction
-) external payable {}
-```
-
-`prepareForPaymaster` will be called before `payForTransaction` if you have a paymaster, another person or entity who will be paying for the transactions.
-
-This lesson gave us a gist of what our IAccount interface will do. Take a moment to review and reflect. Move on to the next lesson when you are ready.
+As always, Let's do some review. Move on to the next lesson when you are ready.
 
 ---
 
@@ -153,44 +71,39 @@ This lesson gave us a gist of what our IAccount interface will do. Take a moment
 
 ---
 
-<summary>1. How is the validateTransaction function in zkSync similar to the validateUserOp function in Ethereum?</summary>
-
----
+<summary>1. What are the two phases of sending an account abstraction transaction in zkSync?</summary>
 
 <details>
 
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
 ```Solidity
-Both functions are used to validate transactions or user operations. In zkSync, the Transaction struct is used instead of the PackedUserOp struct in Ethereum.
+Validation & Execution
 ```
 
 </details>
 
-<summary>2.  What is the role of the executeTransactionFromOutside function?</summary>
-
----
+<summary>2.  What is the role of the ContractDeployer system contract in zkSync?</summary>
 
 <details>
 
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
-```Solidity
-This function allows someone else to execute a transaction that has been signed by the original sender.
-```
+- Deploying other smart contracts on zkSync.
+- Generating the address of the deployed smart contract.
+- Incrementing the deployment nonce.
+- Ensuring that the constructor is never called twice in a contract.
 
 </details>
 
-<summary>3. When is the prepareForPaymaster function called?</summary>
-
----
+<summary>3. How does deploying a smart contract on zkSync differ from deploying on Ethereum?</summary>
 
 <details>
 
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
 ```Solidity
-It is called before the payForTransaction function if there is a paymaster involved. A paymaster is another person or entity who will be paying for the transactions.
+On Ethereum, deploying a smart contract involves sending a transaction containing the compiled code of the smart contract. In zkSync a sender must call a function on a system contract, ContractDeployer, to create a smart contract. zkSync may also require different commands in the terminal, such as using forge create --zksync --legacy instead of just forge create.
 ```
 
 </details>
