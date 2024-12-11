@@ -1,144 +1,50 @@
-# Account Abstraction Lesson 21: Type 113 Lifecycle
+# Account Abstraction Lesson 22: zkSync Accounts Recap
 
-In the previous lesson we talked about the two phases of sending a transaction on zkSync, aka **Type 113 Lifecycle**, validation and execution. We specifically honed in on the `ContractDeployer`. In this lesson, we are going to:
+Even though we haven't done a lot coding yet, we have covered a lot in the way that accounts work in zkSync. Here is a quick recap.
 
-- review the remaining steps in the lifecycle.
-- get a better understanding of the bootloader and it's role
-- touch on how we will make this work in our code (but no actual coding in this lesson)
+- Account Abstraction is called Type 113
 
-Let's go ahead and review this now.
+- No alt-mempool, transaction go directly to zkSync nodes
 
-## Lifecycle of a type 113 (0x71) transaction
+- Transaction lifecycle is run by system contracts
 
-**Phase 1: Validation**
+- A system contract called `bootloader` becomes the owner/sender
 
-1. The user sends the transaction to the "zkSync API client" (sort of a "light node").
-2. The zkSync API client checks to see that the nonce is unique by querying the `NonceHolder` system contract.
-3. The zkSync API client calls `validateTransaction`, which MUST update the nonce.
-4. The zkSync API client checks the nonce is updated.
-5. The zkSync API client calls `payForTransaction`, or `prepareForPaymaster` & `validateAndPayForPaymasterTransaction`.
-6. The zkSync API client verifies that the bootloader gets paid.
+- NonceHolder contains mapping off all nonces and addresses
 
-**Phase 2: Execution**
+- The two phases of the lifecycle are validation and execution
 
-1. The zkSync API client passes the validated transaction to the main node / sequencer (as of today, they are the same).
-2. The main node calls `executeTransaction`.
-3. If a paymaster was used, the `postTransaction` is called.
+  - **Phase 1: Validation**
 
----
+  1. The user sends the transaction to the "zkSync API client" (sort of a "light node").
 
-### Phase 1 Step 2: Ensure Nonce is Unique
+  2. The zkSync API client checks to see that the nonce is unique by querying the `NonceHolder` system contract.
 
-Let's take a closer look at step 2 in the validation phase. We can see that another system contract is mentioned - `NonceHolder.sol`.
+  3. The zkSync API client calls `validateTransaction`, which MUST update the nonce.
 
-- The zkSync API client checks to see that the nonce is unique by querying the `NonceHolder` system contract.
+  4. The zkSync API client checks the nonce is updated.
 
-If you go into the [`NonceHolder`](https://github.com/Cyfrin/foundry-era-contracts/blob/3f99de4a37b126c5cb0466067f37be0c932167b2/src/system-contracts/contracts/NonceHolder.sol) [contract](https://github.com/Cyfrin/foundry-era-contracts/blob/3f99de4a37b126c5cb0466067f37be0c932167b2/src/system-contracts/contracts/NonceHolder.sol) you will see that it contains a lot of mappings. Here we will be able to see the nonce of all the contracts in zkSync.
+  5. The zkSync API client calls `payForTransaction`, or `prepareForPaymaster` & `validateAndPayForPaymasterTransaction`.
 
----
+  6. The zkSync API client verifies that the bootloader gets paid.
 
-### Phase 1 Step 3: Update the Nonce
+  - **Phase 2: Execution**
 
-In our `ZkMinimalAccount`, `validateTransaction` will be called. If successful, the nonce will be updated in `NonceHolder`.
+  1. The zkSync API client passes the validated transaction to the main node / sequencer (as of today, they are the same).
+  2. The main node calls `executeTransaction`.
+  3. If a paymaster was used, the `postTransaction` is called.
+
+- Additionally, we can have an outside sender who is not the `bootloader`.
+  - We will need to make it run through the same validation phase as the `bootloader` would have.
+
+Now that we have our roadmap, it's time to start building. Take as much time as you need to review and reflect. Ask questions and join the discussion at the spaces below.
 
 ---
 
-```solidity
-function validateTransaction(
-  bytes32 _txHash,
-  bytes32 _suggestedSignedHash,
-  Transaction memory _transaction
-) external payable returns (bytes4 magic) {}
-```
+[Discord](https://discord.com/invite/cyfrin)
 
 ---
 
-This raises a very important question. Who is the `msg.sender` when `validateTransaction` is called? The `msg.sender` will always be the bootloader system contract. The bootloader is essentially a super-admin of the system contracts. In a way, it is similar to EntryPoint on Ethereum. You can **[read more on that here.](https://docs.zksync.io/zk-stack/components/zksync-evm/bootloader)**
-
-> ❗ **NOTE** We will eventually create two modifiers to require bootloader or owner to be the sender. This will be similar to what we did in our MinimalAccount in Ethereum.
+[GitHub](https://github.com/Cyfrin/foundry-full-course-cu/discussions)
 
 ---
-
-### Phase 1 Steps 4-6: Check if the Nonce is Updated & Bootloader is Paid
-
-Essentially, if `validateTransaction` does not update the nonce, the entire transaction will revert. If the nonce is updated, then it's time to pay for the transaction. zkSync will call either `payForTransaction` or `prepareForPaymaster` and `validateAndPayForPaymasterTransaction`. Once this happens, zkSync verifies that the bootloader gets paid. If all of these steps are successful, the validation phase of our TxType 113 lifecycle is complete.
-
----
-
-### Phase 2 Execution
-
-Once the validation phase is successful, it is sent to the main node and `executeTransaction` can be called in our `ZkMinimalAccount`. If a paymaster was used, the `postTransaction` is called.
-
-```solidity
-function executeTransaction(
-  bytes32 _txHash,
-  bytes32 _suggestedSignedHash,
-  Transaction memory _transaction
-) external payable {}
-```
-
----
-
-This is essentially what will happen in our transaction lifecycle through the validation and execution phases. Let's take some time to review. Move on to the next lesson when you are ready.
-
----
-
-### Questions for Review
-
----
-
-<summary>1. What is the role of the NonceHolder system contract in zkSync?</summary>
-
----
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-```Solidity
-It is responsible for managing nonces in zkSync. It ensures that each transaction has a unique nonce, which is crucial for transaction validation and preventing replay attacks.
-```
-
-</details>
-
-<summary>2.  Who is the msg.sender when validateTransaction is called in zkSync?</summary>
-
----
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-```Solidity
-The msg.sender when validateTransaction is called in zkSync is always the bootloader system contract. The bootloader acts as a super-admin of the system contracts, similar to the EntryPoint on Ethereum.
-```
-
-</details>
-
-<summary>3.  What happens if validateTransaction does not update the nonce?</summary>
-
----
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-```Solidity
-The entire transaction will revert.
-```
-
-</details>
-
-<summary>4.  What is the role of the bootloader in zkSync?</summary>
-
----
-
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-```Solidity
-It is responsible for validating and executing transactions, ensuring that the nonce is updated, and verifying that the bootloader gets paid. It plays a crucial role in the transaction lifecycle.
-```
-
-</details>
