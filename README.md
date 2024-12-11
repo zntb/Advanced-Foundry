@@ -1,86 +1,142 @@
-# Account Abstraction Lesson 17: Live Demo on Arbitrum
+# Account Abstraction Lesson 18: zkSync Setup
 
-The time has come for us to deploy our code base. Let's run our deploy script - `DeployMinimal`.
-
----
-
-> ❗ **IMPORTANT** This demo is run on a real network, which requires real money. It's recommended just to follow along with the video, and focus more on the code and learning how to deploy to the mainnet.
-
-> ❗ **NOTE** The hardcoded values are from the instructor. Your actual values may vary. As always, you can see up-to-date code in the repo.
-
-🔥🔥🔥[Cyfrin Minimal Account Abstraction Repo](https://github.com/Cyfrin/minimal-account-abstraction)🔥🔥🔥
+Welcome to the beginning of our journey with **account abstraction** on **zkSync**. One of the main differences that you'll immediately notice is that we won't need to worry about alt-mempools, as zkSync has native account abstraction. Additionally, there isn't an EntryPoint.sol. Transactions go directly to your contract. Here is a description:
 
 ---
 
-Run the following in your terminal.
+**zkSync Account Flow**
+
+## Overview of ZK System Contracts
+
+To get started, we are going to install Cyfrin Foundry Era Contracts. This is a mirror of the zksync system contracts. We will be using them for the beginning of our learning journey.
+
+> ❗ **IMPORTANT** Once the era-contracts GitHub repo releases a library edition, we will recommend people to use that instead.
 
 ```bash
-forge script script/DeployMinimal.s.sol --rpc-url $ARBITRUM_RPC_URL --account smallmoney --broadcast --verify
+forge install Cyfrin/foundry-era-contracts@v0.0.3 --no-commit
 ```
 
-We forgot to complete the `run` function in our `SendPackedUserOp` script. Let's do that now.
+Go ahead and open `IAccount.sol` and `DefaultAccount.sol`. Be sure that you are in _**foundry-era-contracts**_ and not _**account-abstraction**_.
+
+### Default Accounts
+
+In Ethereum, we have two types of wallets.
+
+- **EOA** like Metamask
+- **Smart Contract** like our account contract that we built
+
+On the other hand, in zkSync EOAs are smart contracts. Thus, all smart contract accounts in zk are setup as default accounts. Let's take a look.
+
+1. Grab your wallet address from Metamask etc...
+2. [Click here to go to zkSync Era Block Explorer.](https://sepolia.explorer.zksync.io/)
+3. Paste your address into the search bar
+4. Follow along with the video from 4:00
+
+**Should look something like this.**
+
+### IAccount Interface
+
+In IAccount we can see the interface that all wallets/EOAs follow.
+
+- `validateTransaction`
+- `executeTransaction`
+- `executeTransactionFromOutside`
+- `prepareForPaymaster`
+
+Take a moment to look over the contract to become more familiar with what it does. Don't worry if you don't completely understand everything, as we will be learning it together.
 
 ---
 
-**<span style="color:red">SendPackedUserOp.s.sol</span>**
+### ZK Minimal Account
+
+Go into zksync folder in your src. Create a new file and call it `ZkMinimalAccount.sol`. First, we need to:
+
+- import `IAccount.sol`
+- import `Transaction` from `MemoryTransactionHelper.sol`
+- set up our contract to inherit `IAccount`
+- Copy and paste functions from `IAccount` into our contract
 
 ```solidity
-// Add these imports
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { MinimalAccount } from "src/ethereum/MinimalAccount.sol";
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
 
-// run function
-function run() public {
-  // Setup
-  HelperConfig helperConfig = new HelperConfig();
-  address dest = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831; // Arbitrum mainnet USDC address
-  uint256 value = 0;
+import { IAccount } from "lib/foundry-era-contracts/src/system-contracts/contracts/interfaces/IAccount.sol";
+import { Transaction } from "lib/foundry-era-contracts/src/system-contracts/contracts/libraries/MemoryTransactionHelper.sol";
 
-  bytes memory functionData = abi.encodeWithSelector(
-    IERC20.approve.selector,
-    0x9EA9b0cc1919def1A3CfAEF4F7A66eE3c36F86fC,
-    1e18
-  );
+contract ZkMinimalAccount is IAccount {
+  function validateTransaction(
+    bytes32 _txHash,
+    bytes32 _suggestedSignedHash,
+    Transaction calldata _transaction
+  ) external payable returns (bytes4 magic) {}
 
-  bytes memory executeCalldata = abi.encodeWithSelector(
-    MinimalAccount.execute.selector,
-    dest,
-    value,
-    functionData
-  );
+  function executeTransaction(
+    bytes32 _txHash,
+    bytes32 _suggestedSignedHash,
+    Transaction calldata _transaction
+  ) external payable {}
 
-  PackedUserOperation memory userOp = generateSignedUserOperation(
-    executeCalldata,
-    helperConfig.getConfig(),
-    0x03Ad95a54f02A40180D45D76789C448024145aaF
-  );
-  PackedUserOperation[] memory ops = new PackedUserOperation[](1);
-  ops[0] = userOp;
+  function executeTransactionFromOutside(
+    Transaction calldata _transaction
+  ) external payable;
 
-  // Send transaction
-  vm.startBroadcast();
-  IEntryPoint(helperConfig.getConfig().entryPoint).handleOps(
-    ops,
-    payable(helperConfig.getConfig().account)
-  );
-  vm.stopBroadcast();
+  function payForTransaction(
+    bytes32 _txHash,
+    bytes32 _suggestedSignedHash,
+    Transaction calldata _transaction
+  ) external payable {}
+
+  function prepareForPaymaster(
+    bytes32 _txHash,
+    bytes32 _possibleSignedHash,
+    Transaction calldata _transaction
+  ) external payable {}
 }
 ```
 
----
-
-> ❗ **NOTE** HelperConfig for arbitrum has already been set up off screen.
+Now we have our **ZK Minimal Account** set up. Things are starting to get exciting! Let's take a moment to review. When you are ready, move on to the next lesson.
 
 ---
 
-Now that we've got it set up, let's deploy our `SendPackedUserOp.s.sol` to Arbitrum.
+### Questions for Review
 
-Run the following in your terminal.
+<summary>1. What is the main difference between zkSync and Ethereum regarding account abstraction?</summary>
 
-```bash
-forge script script/SendPackedUserOp.s.sol --rpc-url $ARBITRUM_RPC_URL --account smallmoney --broadcast -vvv
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+```Solidity
+zkSync has native account abstraction, which means there is no need for alt-mempools or an EntryPoint.sol. Transactions go directly to your contract.
 ```
 
-Congratulations! We've successfully made our first **account abstraction user operation call!**
+</details>
 
-When you are ready, move on to the next lesson.
+<summary>2. How are EOAs different in zkSync compared to Ethereum?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+In zkSync, EOAs are smart contracts.
+
+</details>
+
+<summary>3. What are the 4 functions of the IAccount interface?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+- validateTransaction
+- executeTransaction
+- executeTransactionFromOutside
+- prepareForPaymaster
+
+</details>
