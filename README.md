@@ -1,17 +1,14 @@
-# Account Abstraction Lesson 20: System Contracts
+# Account Abstraction Lesson 21: Type 113 Lifecycle
 
-We are rolling along our journey into zkSync account abstraction quite nicely. In this lesson, we are going to:
+In the previous lesson we talked about the two phases of sending a transaction on zkSync, aka **Type 113 Lifecycle**, validation and execution. We specifically honed in on the `ContractDeployer`. In this lesson, we are going to:
 
-- learn the phases of sending an account abstraction transaction
-- become more familiar with system contracts and their importance
+- review the remaining steps in the lifecycle.
+- get a better understanding of the bootloader and it's role
+- touch on how we will make this work in our code (but no actual coding in this lesson)
 
-Let's get it!
+Let's go ahead and review this now.
 
----
-
-## Sending Transactions
-
-There are essentially two phases to send an account abstraction transaction.
+## Lifecycle of a type 113 (0x71) transaction
 
 **Phase 1: Validation**
 
@@ -30,40 +27,59 @@ There are essentially two phases to send an account abstraction transaction.
 
 ---
 
-### `ContractDeployer` System Contract
+### Phase 1 Step 2: Ensure Nonce is Unique
 
-A system contract contains smart contracts that are deployed on zkSync by default. Let's take a look at one of the most important ones - `ContractDeployer`.
+Let's take a closer look at step 2 in the validation phase. We can see that another system contract is mentioned - `NonceHolder.sol`.
 
-- Go back to [zkSync Era Block Explorer](https://sepolia.explorer.zksync.io/)
+- The zkSync API client checks to see that the nonce is unique by querying the `NonceHolder` system contract.
 
-- Copy this address into the search bar.
-
-```solidity
-0x0000000000000000000000000000000000008006;
-```
-
-- You should see **ContractDeployer**.
-
-Scroll down a bit and click on the contract tab. You should then be able to see `ContractDeployer.sol` along with many other zkSync contracts. Essentially, the ContractDeployer governs other contracts. It is a system contract that is responsible:
-
-- for deploying other smart contracts on zkSync.
-- for generating the address of the deployed smart contract.
-- incrementing the deployment nonce.
-- making sure that the constructor is never called twice in a contract.
-
-On Ethereum, we simply need to send a transaction containing the compiled code of a smart contract. However, things are much different on zkSync. Here, a sender will actually have to call a function on ContractDeployer. Then the function will create a smart contract. As a result, we'll have to do things a bit differently in our terminal.
-
-For example: on Ethereum we can simply run `forge create` in our terminal. In zkSync we'll need to do this:
+If you go into the [`NonceHolder`](https://github.com/Cyfrin/foundry-era-contracts/blob/3f99de4a37b126c5cb0466067f37be0c932167b2/src/system-contracts/contracts/NonceHolder.sol) [contract](https://github.com/Cyfrin/foundry-era-contracts/blob/3f99de4a37b126c5cb0466067f37be0c932167b2/src/system-contracts/contracts/NonceHolder.sol) you will see that it contains a lot of mappings. Here we will be able to see the nonce of all the contracts in zkSync.
 
 ---
 
-```bash
-forge create --zksync --legacy
+### Phase 1 Step 3: Update the Nonce
+
+In our `ZkMinimalAccount`, `validateTransaction` will be called. If successful, the nonce will be updated in `NonceHolder`.
+
+---
+
+```solidity
+function validateTransaction(
+  bytes32 _txHash,
+  bytes32 _suggestedSignedHash,
+  Transaction memory _transaction
+) external payable returns (bytes4 magic) {}
 ```
 
-If you'd like to [learn more about these system contracts, click here.](https://docs.zksync.io/build/developer-reference/era-contracts/system-contracts)
+---
 
-As always, Let's do some review. Move on to the next lesson when you are ready.
+This raises a very important question. Who is the `msg.sender` when `validateTransaction` is called? The `msg.sender` will always be the bootloader system contract. The bootloader is essentially a super-admin of the system contracts. In a way, it is similar to EntryPoint on Ethereum. You can **[read more on that here.](https://docs.zksync.io/zk-stack/components/zksync-evm/bootloader)**
+
+> ❗ **NOTE** We will eventually create two modifiers to require bootloader or owner to be the sender. This will be similar to what we did in our MinimalAccount in Ethereum.
+
+---
+
+### Phase 1 Steps 4-6: Check if the Nonce is Updated & Bootloader is Paid
+
+Essentially, if `validateTransaction` does not update the nonce, the entire transaction will revert. If the nonce is updated, then it's time to pay for the transaction. zkSync will call either `payForTransaction` or `prepareForPaymaster` and `validateAndPayForPaymasterTransaction`. Once this happens, zkSync verifies that the bootloader gets paid. If all of these steps are successful, the validation phase of our TxType 113 lifecycle is complete.
+
+---
+
+### Phase 2 Execution
+
+Once the validation phase is successful, it is sent to the main node and `executeTransaction` can be called in our `ZkMinimalAccount`. If a paymaster was used, the `postTransaction` is called.
+
+```solidity
+function executeTransaction(
+  bytes32 _txHash,
+  bytes32 _suggestedSignedHash,
+  Transaction memory _transaction
+) external payable {}
+```
+
+---
+
+This is essentially what will happen in our transaction lifecycle through the validation and execution phases. Let's take some time to review. Move on to the next lesson when you are ready.
 
 ---
 
@@ -71,39 +87,58 @@ As always, Let's do some review. Move on to the next lesson when you are ready.
 
 ---
 
-<summary>1. What are the two phases of sending an account abstraction transaction in zkSync?</summary>
+<summary>1. What is the role of the NonceHolder system contract in zkSync?</summary>
+
+---
 
 <details>
 
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
 ```Solidity
-Validation & Execution
+It is responsible for managing nonces in zkSync. It ensures that each transaction has a unique nonce, which is crucial for transaction validation and preventing replay attacks.
 ```
 
 </details>
 
-<summary>2.  What is the role of the ContractDeployer system contract in zkSync?</summary>
+<summary>2.  Who is the msg.sender when validateTransaction is called in zkSync?</summary>
 
-<details>
-
-**<summary><span style="color:red">Click for Answers</span></summary>**
-
-- Deploying other smart contracts on zkSync.
-- Generating the address of the deployed smart contract.
-- Incrementing the deployment nonce.
-- Ensuring that the constructor is never called twice in a contract.
-
-</details>
-
-<summary>3. How does deploying a smart contract on zkSync differ from deploying on Ethereum?</summary>
+---
 
 <details>
 
 **<summary><span style="color:red">Click for Answers</span></summary>**
 
 ```Solidity
-On Ethereum, deploying a smart contract involves sending a transaction containing the compiled code of the smart contract. In zkSync a sender must call a function on a system contract, ContractDeployer, to create a smart contract. zkSync may also require different commands in the terminal, such as using forge create --zksync --legacy instead of just forge create.
+The msg.sender when validateTransaction is called in zkSync is always the bootloader system contract. The bootloader acts as a super-admin of the system contracts, similar to the EntryPoint on Ethereum.
+```
+
+</details>
+
+<summary>3.  What happens if validateTransaction does not update the nonce?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+```Solidity
+The entire transaction will revert.
+```
+
+</details>
+
+<summary>4.  What is the role of the bootloader in zkSync?</summary>
+
+---
+
+<details>
+
+**<summary><span style="color:red">Click for Answers</span></summary>**
+
+```Solidity
+It is responsible for validating and executing transactions, ensuring that the nonce is updated, and verifying that the bootloader gets paid. It plays a crucial role in the transaction lifecycle.
 ```
 
 </details>
