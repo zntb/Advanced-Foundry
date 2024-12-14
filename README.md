@@ -1,197 +1,125 @@
-# Account Abstraction Lesson 27: Execute Transaction From Outside
+# Account Abstraction Lesson 28: zkSync Tests
 
-We've got one more function to cover before we can start testing, and that is the `executeTransactionFromOutside` function. This will let us have another person to send our transaction and pay for the gas. Similar to `executeTransaction`, we'd just need to set our function up to validate and execute a transaction.
+Taking tests may not be much fun, but making them sure can be. Let's make some tests for our `ZkMinimalAccount`. In our test folder, create another folder called zkSync. In the zkSync folder, create a file and call it `ZkMinimalAccountTest.t.sol`. Let's go ahead and set up the essentials of our code. For this we will need:
 
-In this lesson we will be doing a bit of refactoring. We are going to:
-
-- create `_validateTransaction` and call it in `validateTransaction`
-- create `_executeTransaction` and call it in `executeTransaction`
-- call `_executeTransaction` and `_validateTransaction`, and call them in `executeTransactionFromOutside`
-
-Let's get it!
-
----
-
-## Internal Function `_validateTransaction`
-
-Since we are beginning to use code from the bodies of `validateTransaction` and `executeTransaction` in other functions, let's go ahead and set them as their own separate functions.
-
-Take the the following from `validateTransaction`.
+- a license and pragma
+- to import `Test` and `ZkMinimalAccount`
+- to inherit `Test`
+- create a variable for our `ZkMinimalAccount` contract
+  - to initialize a new instance of `ZkMinimalAccount` in the setUp function
 
 ```solidity
-// Call nonceholder
-// increment nonce
-// call(x, y, z) -> system contract call
-SystemContractsCaller.systemCallWithPropagatedRevert(
-    uint32(gasleft()),
-    address(NONCE_HOLDER_SYSTEM_CONTRACT),
-    0,
-    abi.encodeCall(INonceHolder.incrementMinNonceIfEquals, (_transaction.nonce))
-);
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
 
-// Check for fee to pay
-uint256 totalRequiredBalance = _transaction.totalRequiredBalance();
-if (totalRequiredBalance > address(this).balance) {
-    revert ZkMinimalAccount__NotEnoughBalance();
-}
+import { Test } from "forge-std/Test.sol";
+import { ZkMinimalAccount } from "src/zksync/ZkMinimalAccount.sol";
 
-// Check the signature
-bytes32 txHash = _transaction.encodeHash();
-// bytes32 convertedHash = MessageHashUtils.toEthSignedMessageHash(txHash);
-address signer = ECDSA.recover(txHash, _transaction.signature);
-bool isValidSigner = signer == owner();
-if (isValidSigner) {
-    magic = ACCOUNT_VALIDATION_SUCCESS_MAGIC;
-} else {
-    magic = bytes4(0);
-}
-return magic;
-```
+contract ZkMinimalAccountTest is Test {
+  ZkMinimalAccount minimalAccount;
 
----
-
-Then place it in our first internal function called `_validateTransaction`. Since we are ignoring `_txHash` and `_suggestedSignedHash`, we only need to pass `_transaction` and return `bytes4 magic`.
-
-```solidity
-/*//////////////////////////////////////////////////////////////
-                           INTERNAL FUNCTIONS
-//////////////////////////////////////////////////////////////*/
-function _validateTransaction(
-  Transaction memory _transaction
-) internal returns (bytes4 magic) {
-  // Call nonceholder
-  // increment nonce
-  // call(x, y, z) -> system contract call
-  SystemContractsCaller.systemCallWithPropagatedRevert(
-    uint32(gasleft()),
-    address(NONCE_HOLDER_SYSTEM_CONTRACT),
-    0,
-    abi.encodeCall(INonceHolder.incrementMinNonceIfEquals, (_transaction.nonce))
-  );
-
-  // Check for fee to pay
-  uint256 totalRequiredBalance = _transaction.totalRequiredBalance();
-  if (totalRequiredBalance > address(this).balance) {
-    revert ZkMinimalAccount__NotEnoughBalance();
-  }
-
-  // Check the signature
-  bytes32 txHash = _transaction.encodeHash();
-  // bytes32 convertedHash = MessageHashUtils.toEthSignedMessageHash(txHash);
-  address signer = ECDSA.recover(txHash, _transaction.signature);
-  bool isValidSigner = signer == owner();
-  if (isValidSigner) {
-    magic = ACCOUNT_VALIDATION_SUCCESS_MAGIC;
-  } else {
-    magic = bytes4(0);
-  }
-  return magic;
-}
-```
-
-Now, we can simply pass our new function into the body of other functions. Let's do that now in `validateTransaction`. Pass in `return _validateTransaction(_transaction);`. Now our `validateTransaction` should look like this:
-
-```solidity
-function validateTransaction(
-  bytes32,
-  /*_txHash*/ bytes32,
-  /*_suggestedSignedHash*/ Transaction memory _transaction
-) external payable requireFromBootLoader returns (bytes4 magic) {
-  return _validateTransaction(_transaction);
-}
-```
-
----
-
-### Internal Function `_executeTransaction`
-
-Let's do the same for the `executeTransaction` function. Copy the following from `executeTransaction`.
-
-```solidity
-address to = address(uint160(_transaction.to));
-uint128 value = Utils.safeCastToU128(_transaction.value);
-bytes memory data = _transaction.data;
-
-if (to == address(DEPLOYER_SYSTEM_CONTRACT)) {
-    uint32 gas = Utils.safeCastToU32(gasleft());
-    SystemContractsCaller.systemCallWithPropagatedRevert(gas, to, value, data);
-} else {
-    bool success;
-    assembly {
-        success := call(gas(), to, value, add(data, 0x20), mload(data), 0, 0)
-    }
-    if (!success) {
-        revert ZkMinimalAccount__ExecutionFailed();
-    }
-}
-```
-
----
-
-Then place it in our first internal function called `_executeTransaction`. Since we are ignoring `_txHash` and `_suggestedSignedHash`, we only need to pass `_transaction`.
-
-```solidity
-function _executeTransaction(Transaction memory _transaction) internal {
-  address to = address(uint160(_transaction.to));
-  uint128 value = Utils.safeCastToU128(_transaction.value);
-  bytes memory data = _transaction.data;
-
-  if (to == address(DEPLOYER_SYSTEM_CONTRACT)) {
-    uint32 gas = Utils.safeCastToU32(gasleft());
-    SystemContractsCaller.systemCallWithPropagatedRevert(gas, to, value, data);
-  } else {
-    bool success;
-    assembly {
-      success := call(gas(), to, value, add(data, 0x20), mload(data), 0, 0)
-    }
-    if (!success) {
-      revert ZkMinimalAccount__ExecutionFailed();
-    }
+  function setUp() public {
+    minimalAccount = new ZkMinimalAccount();
   }
 }
 ```
 
-Now we can pass `_executeTransaction(_transaction) ` into `executeTransaction`.
+---
+
+## Test if Zk Owner Can Execute Commands
+
+Essentially, our test will be very similar to what we did in for `MinimalAccount` on Ethereum. Let's start with the `executeTransaction` function. Will start with our usual set up of **Arrange**, **Act**, and **Assert**.
 
 ```solidity
-function executeTransaction(
-  bytes32,
-  /*_txHash*/ bytes32,
-  /*_suggestedSignedHash*/ Transaction memory _transaction
-) external payable requireFromBootLoaderOrOwner {
-  _executeTransaction(_transaction);
+function testZkOwnerCanExecuteCommands() public {
+  // Arrange
+  // Act
+  // Assert
+}
+```
+
+For **Arrange** we will need:
+
+- Assign token contract address to `dest`.
+- Set transaction `value` to 0.
+- Encode `functionData` for minting mock ERC20 tokens.
+- Create an unsigned transaction with the owner's address, nonce, destination, value, and function data.
+
+Let's start by importing ERC20Mock.
+
+```solidity
+import { ERC20Mock } from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+```
+
+Next, we can create the usdc token in the variable section, and initialize a new instance of the mock in the `setUp` function. We will also need a constant `AMOUNT` variable set to 1e18.
+
+Place these with other state variables.
+
+```solidity
+ERC20Mock usdc;
+
+uint256 constant AMOUNT = 1e18;
+```
+
+Place this inside the `setUp` function
+
+```solidity
+usdc = new ERC20Mock();
+```
+
+---
+
+Our **Arrange** should look like this now.
+
+```solidity
+// Arrange
+address dest = address(usdc);
+uint256 value = 0;
+bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(minimalAccount), AMOUNT);
+
+Transaction memory transaction =
+    _createUnsignedTransaction(minimalAccount.owner(), 113, dest, value, functionData);
+```
+
+Our entire code should look like this.
+
+---
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import { Test } from "forge-std/Test.sol";
+import { ZkMinimalAccount } from "src/zksync/ZkMinimalAccount.sol";
+import { ERC20Mock } from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+
+contract ZkMinimalAccountTest is Test {
+  ZkMinimalAccount minimalAccount;
+  ERC20Mock usdc;
+
+  uint256 constant AMOUNT = 1e18;
+
+  function setUp() public {
+    minimalAccount = new ZkMinimalAccount();
+    usdc = new ERC20Mock();
+  }
+
+  function testZkOwnerCanExecuteCommands() public {
+    // Arrange
+    address dest = address(usdc);
+    uint256 value = 0;
+    bytes memory functionData = abi.encodeWithSelector(
+      ERC20Mock.mint.selector,
+      address(minimalAccount),
+      AMOUNT
+    );
+
+    // Act
+    // Assert
+  }
 }
 ```
 
 ---
 
-### `executeTransactionFromOutside`
-
-Now that we've got that done, we can call both of our new contracts in `executeTransactionFromOutside`.
-
-```solidity
-function executeTransactionFromOutside(
-  Transaction memory _transaction
-) external payable {
-  _validateTransaction(_transaction);
-  _executeTransaction(_transaction);
-}
-```
-
----
-
-Now that we've got our functions just about sorted, let's go ahead and make sure our contract can receive funds. Place the following `receive` function just under the constructor.
-
-```solidity
-receive() external payable {}
-```
-
-Now our code should compile successfully with some yellow warnings.
-
-```bash
-forge build --zksync
-```
-
----
-
-Congratulations! You've just completed your ZkMinimalAccount.sol for account abstraction. This was simply a bit of refactoring so no review questions at this time. However, take some time to review and reflect. Move on to the next lesson when you are ready.
+I know that we are not finished with this function yet, but this is where the video lecture stops. We will complete this test function in the next lesson. Take a moment to review and reflect. Move on to the next lesson when you are ready.
