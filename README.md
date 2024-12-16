@@ -1,416 +1,391 @@
-# Governor Contract
+# Tests
 
-Alright, we've got one major piece missing from our DAO protocol and that's the governor contract. This is the heart of the DAO which manages the proposal and voting functionality died to the protocol's governance.
-
-Fortunately, **[OpenZeppelin's Contract Wizard](https://wizard.openzeppelin.com/#governor)** can help us here too!
-
-By selecting the `Governor` configuration, we're presenting with a number of options to customize.
-
-![Governor Contract Wizard](./assets/governor-contract1.png)
-
-Voting Delay - Time between proposal creation and the start of voting
-
-Voting Period - How long votes may be submitted for
-
-Proposal Threshold - Minimum number of votes an account must have to create a proposal
-
-Quorum %/# - The number of participants in a vote required for a vote to validly pass
-
-Updatable Settings - allows the above configurations to be updated in future
-
-Votes - This denotes how voting power is derived be it through ERC20s or possessing NFTs etc
-
-Timelock - Configuration related to delays and timelines for various parts of the DAO protocol
-
-Upgradeability - Our bells from last lesson should be going off! This includes proxy functionality within our DAO
-
-We'll keep everything default for this excercise, let's just copy the provided Governor contract into our own file `src/MyGovernor.sol`.
-
-```solidity
-// SPDX-License-Identifier: MIT
-// Compatible with OpenZeppelin Contracts ^5.0.0
-pragma solidity ^0.8.20;
-
-import { Governor, IGovernor } from "@openzeppelin/contracts/governance/Governor.sol";
-import { GovernorSettings } from "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol";
-import { GovernorCountingSimple } from "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
-import { GovernorVotes, IVotes } from "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
-import { GovernorVotesQuorumFraction } from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
-import { GovernorTimelockControl, TimelockController } from "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
-
-contract MyGovernor is
-  Governor,
-  GovernorSettings,
-  GovernorCountingSimple,
-  GovernorVotes,
-  GovernorVotesQuorumFraction,
-  GovernorTimelockControl
-{
-  constructor(
-    IVotes _token,
-    TimelockController _timelock
-  )
-    Governor("MyGovernor")
-    GovernorSettings(7200 /* 1 day */, 50400 /* 1 week */, 0)
-    GovernorVotes(_token)
-    GovernorVotesQuorumFraction(4)
-    GovernorTimelockControl(_timelock)
-  {}
-
-  // The following functions are overrides required by Solidity.
-
-  function votingDelay()
-    public
-    view
-    override(Governor, GovernorSettings)
-    returns (uint256)
-  {
-    return super.votingDelay();
-  }
-
-  function votingPeriod()
-    public
-    view
-    override(Governor, GovernorSettings)
-    returns (uint256)
-  {
-    return super.votingPeriod();
-  }
-
-  function quorum(
-    uint256 blockNumber
-  )
-    public
-    view
-    override(Governor, GovernorVotesQuorumFraction)
-    returns (uint256)
-  {
-    return super.quorum(blockNumber);
-  }
-
-  function state(
-    uint256 proposalId
-  )
-    public
-    view
-    override(Governor, GovernorTimelockControl)
-    returns (ProposalState)
-  {
-    return super.state(proposalId);
-  }
-
-  function proposalNeedsQueuing(
-    uint256 proposalId
-  ) public view override(Governor, GovernorTimelockControl) returns (bool) {
-    return super.proposalNeedsQueuing(proposalId);
-  }
-
-  function proposalThreshold()
-    public
-    view
-    override(Governor, GovernorSettings)
-    returns (uint256)
-  {
-    return super.proposalThreshold();
-  }
-
-  function _queueOperations(
-    uint256 proposalId,
-    address[] memory targets,
-    uint256[] memory values,
-    bytes[] memory calldatas,
-    bytes32 descriptionHash
-  ) internal override(Governor, GovernorTimelockControl) returns (uint48) {
-    return
-      super._queueOperations(
-        proposalId,
-        targets,
-        values,
-        calldatas,
-        descriptionHash
-      );
-  }
-
-  function _executeOperations(
-    uint256 proposalId,
-    address[] memory targets,
-    uint256[] memory values,
-    bytes[] memory calldatas,
-    bytes32 descriptionHash
-  ) internal override(Governor, GovernorTimelockControl) {
-    super._executeOperations(
-      proposalId,
-      targets,
-      values,
-      calldatas,
-      descriptionHash
-    );
-  }
-
-  function _cancel(
-    address[] memory targets,
-    uint256[] memory values,
-    bytes[] memory calldatas,
-    bytes32 descriptionHash
-  ) internal override(Governor, GovernorTimelockControl) returns (uint256) {
-    return super._cancel(targets, values, calldatas, descriptionHash);
-  }
-
-  function _executor()
-    internal
-    view
-    override(Governor, GovernorTimelockControl)
-    returns (address)
-  {
-    return super._executor();
-  }
-}
-```
-
-Alright, there's quite a bit happening here, so let's go through some of it.
-
-Our Governor contract is inheriting `Governor`, `GovernorSettings`, `GovernorCountingSimple`, `GovernorVotes`, `GovernorVotesQuorumFraction`, `GovernorTimelockControl`...all these. Let's glean a high-level understanding of the most important of these.
-
-**Governor.sol:**
-
-This is the core of the governance system. The governor tracks proposals via the `_proposals` mapping
-
-Proposals exist as fairly simple structs:
-
-```solidity
-struct ProposalCore {
-  // --- start retyped from Timers.BlockNumber at offset 0x00 ---
-  uint64 voteStart;
-  address proposer;
-  bytes4 __gap_unused0;
-  // --- start retyped from Timers.BlockNumber at offset 0x20 ---
-  uint64 voteEnd;
-  bytes24 __gap_unused1;
-  // --- Remaining fields starting at offset 0x40 ---------------
-  bool executed;
-  bool canceled;
-}
-```
-
-Each proposal's state is tracked through the `state` function. This references the aforementioned proposal mapping and displays various properties including if it was executed, if quorum was reached etc. This is the function that many front ends will call to display proposal details.
-
-```solidity
-function state(
-  uint256 proposalId
-) public view virtual override returns (ProposalState) {
-  ProposalCore storage proposal = _proposals[proposalId];
-
-  if (proposal.executed) {
-    return ProposalState.Executed;
-  }
-
-  if (proposal.canceled) {
-    return ProposalState.Canceled;
-  }
-
-  uint256 snapshot = proposalSnapshot(proposalId);
-
-  if (snapshot == 0) {
-    revert("Governor: unknown proposal id");
-  }
-
-  uint256 currentTimepoint = clock();
-
-  if (snapshot >= currentTimepoint) {
-    return ProposalState.Pending;
-  }
-
-  uint256 deadline = proposalDeadline(proposalId);
-
-  if (deadline >= currentTimepoint) {
-    return ProposalState.Active;
-  }
-
-  if (_quorumReached(proposalId) && _voteSucceeded(proposalId)) {
-    return ProposalState.Succeeded;
-  } else {
-    return ProposalState.Defeated;
-  }
-}
-```
-
-One of the most important functions in Governor.sol is going to be `propose`, this is the function DAO members will call to submit a proposal for voting, the parameters passed here are very specific.
-
-```solidity
-function propose(
-  address[] memory targets,
-  uint256[] memory values,
-  bytes[] memory calldatas,
-  string memory description
-) public virtual override returns (uint256) {}
-```
-
-**targets** - a list of addresses on which proposed functions will be called
-
-**values** - a list of values to send with each target transaction
-
-**calldatas** - the bytes data representing each transaction and the arguments to pass proposed function calls
-
-**description** - a description of what the proposal does/accomplishes
-
-The proposal function takes these inputs and will hash them, generating a unique proposalId.
-
-Another integral function within this contract is `execute` which we see takes largely the same parameters as `propose`. Within execute, these passed parameters are hashed to determine the valid proposalId to execute. Some checks are performed before the internal \_execute is called and we can see the same low-level functionality we used to call arbitrary functions, in previous lessons.
-
-```solidity
-/**
- * @dev Internal execution mechanism. Can be overridden to implement different execution mechanism
- */
-function _execute(
-  uint256 /* proposalId */,
-  address[] memory targets,
-  uint256[] memory values,
-  bytes[] memory calldatas,
-  bytes32 /*descriptionHash*/
-) internal virtual {
-  string memory errorMessage = "Governor: call reverted without message";
-  for (uint256 i = 0; i < targets.length; ++i) {
-    (bool success, bytes memory returndata) = targets[i].call{
-      value: values[i]
-    }(calldatas[i]);
-    Address.verifyCallResult(success, returndata, errorMessage);
-  }
-}
-```
-
-The last major function I'll detail is \_castVote. There are a number of derivated such as castVoteWithReason, castVoteBySig etc, but ultimately they boil down to this \_castVote logic.
-
-```solidity
-/**
- * @dev Internal vote casting mechanism: Check that the vote is pending, that it has not been cast yet, retrieve
- * voting weight using {IGovernor-getVotes} and call the {_countVote} internal function.
- *
- * Emits a {IGovernor-VoteCast} event.
- */
-function _castVote(
-  uint256 proposalId,
-  address account,
-  uint8 support,
-  string memory reason,
-  bytes memory params
-) internal virtual returns (uint256) {
-  ProposalCore storage proposal = _proposals[proposalId];
-  require(
-    state(proposalId) == ProposalState.Active,
-    "Governor: vote not currently active"
-  );
-
-  uint256 weight = _getVotes(account, proposal.voteStart, params);
-  _countVote(proposalId, account, support, weight, params);
-
-  if (params.length == 0) {
-    emit VoteCast(account, proposalId, support, weight, reason);
-  } else {
-    emit VoteCastWithParams(
-      account,
-      proposalId,
-      support,
-      weight,
-      reason,
-      params
-    );
-  }
-
-  return weight;
-}
-```
-
-This function is fairly simple, it references the proposal via the passed proposalId, determines a voting weight with \_getVotes, then adds the votes to an internal count of votes for that proposal, finally emitting an event.
-
-Many of the functions within Governor.sol, we'll notice, are unimplemented. This is because Governor.sol is `abstract` and we're expected to fill some of these in with our own specific logic.
-
-**GovernorVotes.sol:**
-
-This contract extracts voting weight from the ERC20 tokens used for a protocols governance.
-
-**GovernorSettings.sol:**
-
-An extension contract that allows configuration of things like voting delay, voting period and proposalThreshhold to the protocol.
-
-**GovernorCountingSimple.sol:**
-
-This extention implements a simplied vote counting mechanism by which each proposal is assigned a ProposalVote struct in which forVotes, againstVotes and abstainVotes are tallied.
-
-```solidity
-struct ProposalVotes {
-  uint256 againstVotes;
-  uint256 forVotes;
-  uint256 abstainVotes;
-  mapping(address => bool) hasVoted;
-}
-```
-
-**GovernorVotesQuorumFraction:**
-
-An extention which assists in token voting weight extraction.
-
-**GovernorTimelockControl.sol:**
-
-_This_ is actually quite an important implementation and every DAO should employ a Timelock Controller. Effectively the Timelock controller is going to serve as a regulator for the Governor. Each time the Governor control attempts to take an action, it will need to be checked versus the Timelock controller to account to cooldown periods, or voting delays.
-
-This functionality is important for a number of reasons, two major ones that come to mind are:
-
-- Security - delays between successful votes and proposal execution afford the protocol/community time to assure there was no malicious code
-- Fairness - this affords anyone who disagrees with a successful proposal time to exit their position on the protocol
-
-## MyGovernor.sol Constructor
-
-So, with a better understanding of all the functionality our DAO has under-the-hood, the constructor we copied over from the Contract Wizard should make a lot of sense to us.
-
-```solidity
-constructor(
-  IVotes _token,
-  TimelockController _timelock
-)
-  Governor("MyGovernor")
-  GovernorSettings(7200, /* 1 day */ 50400, /* 1 week */ 0)
-  GovernorVotes(_token)
-  GovernorVotesQuorumFraction(4)
-  GovernorTimelockControl(_timelock)
-{}
-```
-
-On deployment our DAO will take a governance token and a TimelockController as well as configure a bunch of the settings we left as default 😅
-
-The TimelockController is going to be the last contract we need to write, actually!
-
-### Timelock.sol
-
-We don't get a Contract Wizard shortcut this time, but it won't be too difficult to build this one out ourselves, we _can_ still leverage the OpenZeppelin governance library.
+Let's jump right into writing our tests. Begin with creating `test/MyGovernorTest.t.sol`. We're going to have one giant test to show this whole process end to end, let's start with the usual boilerplate!
 
 ```solidity
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.18;
 
-import { TimelockController } from "@openzeppelin/contracts/governance/TimelockController.sol";
+import { Test } from "forge-std/Test.sol";
+import { MyGovernor } from "../src/MyGovernor.sol";
+import { Box } from "../src/Box.sol";
+import { Timelock } from "../src/Timelock.sol";
+import { GovToken } from "../src/GovToken.sol";
 
-contract Timelock {
-  /**
-   * @notice Create a new Timelock controller
-   * @param minDelay Minimum delay for timelock executions
-   * @param proposers List of addresses that can propose new transactions
-   * @param executors List of addresses that can execute transactions
-   */
-  constructor(
-    uint256 minDelay,
-    address[] memory proposers,
-    address[] memory executors
-  ) TimelockController(minDelay, proposers, executors, msg.sender) {}
+contract MyGovernorTest is Test {
+  MyGovernor governor;
+  Box box;
+  Timelock timelock;
+  GovToken govToken;
+
+  function setUp() public {
+    govToken = new GovToken();
+  }
 }
 ```
 
-In the above, we're passing `msg.sender` to the `TimelockController`'s `admin` parameter. We have to set an initial admin for the controller, but this can and should be changed after deployment
+We've more of our imported contracts that we'll need to deploy, but at this point we should consider the minting of our GovToken, you can choose to include the minting of your initial supply within the constructor of your GovToken ERC20, but I'm just going to add a mint function to it.
 
-### Wrap Up
+```solidity
+function mint(address _to, uint256 _amount) public {
+  _mint(_to, _amount);
+}
+```
 
-That's it! I know we're moving through things kinda quickly, but if anything is confusing, this is your chance to jump into the community for clarification.
+> ❗ **IMPORTANT**
+> You probably _**don't**_ want a function that anyone can call in order to mint your governance token, we're just applying this here to make our testing easier.
 
-These systems and methodologies seem complex when all put together like this, but nothing we've gone over here is fundamentally any different than things we've seen before.
+```solidity
+contract MyGovernorTest is Test {
+  MyGovernor governor;
+  Box box;
+  Timelock timelock;
+  GovToken govToken;
 
-In the next lesson, we're going to dive into tests. We'll skip the deploy script this time around, but we'll have an opportunity to see how this DAO functions end to end.
+  address public USER = makeAddr("user");
+  uint256 public constant INITIAL_SUPPLY = 100 ether;
+
+  function setUp() public {
+    govToken = new GovToken();
+    govToken.mint(USER, INITIAL_SUPPLY);
+  }
+}
+```
+
+Something commonly overlooked when writing tests this way is that, just because our user has minted tokens, doesn't mean they have voting power. It's necessary to call the delegate function to assign this weight to the user who minted.
+
+```solidity
+function setUp() public {
+  govToken = new GovToken();
+  govToken.mint(USER, INITIAL_SUPPLY);
+  vm.startPrank(USER);
+  govToken.delegate(USER);
+}
+```
+
+Now we can deploy our Timelock contract, we'll need both the Timelock and the governance token to deploy our governor contract! The Timelock constructor requires a minDelay, a list of proposers and a list of executors, so we'll need to declare those.
+
+Once the Timelock has been deployed, we can finally deploy our governor contract.
+
+```solidity
+contract MyGovernorTest is Test {
+    MyGovernor governor;
+    Box box;
+    Timelock timelock;
+    GovToken govToken;
+
+    address public USER = makeAddr("user");
+    uint256 public constant INITIAL_SUPPLY = 100 ether;
+
+    uint256 public constant MIN_DELAY = 3600 // 1 hour after a vote passes
+    address[] proposers;
+    address[] executors;
+
+    function setUp() public {
+        govToken = new GovToken();
+        govToken.mint(USER, INITIAL_SUPPLY);
+
+        vm.startPrank(USER);
+        govToken.delegate(USER);
+        timelock = new Timelock(MIN_DELAY, proposers, executors);
+        governor = new MyGovernor(govToken, timelock);
+    }
+}
+```
+
+> ❗ **NOTE**
+> Leaving the `proposers` and `executors` arrays empty is how you tell the timelock that anyone can fill these roles.
+
+Now's the point where we want to tighten up who is able to control what aspects of the DAO protocol. The Timelock contract we're using contains a number of roles which we can set on deployment. For example, we only want our governor to be able to submit proposals to the timelock, so this is something we want want to configure explicitly after deployment. Similarly the `admin` role is defaulted to the address which deployed our timelock, we absolutely want this to be our governor to avoid centralization.
+
+```solidity
+function setUp() public {
+  govToken = new GovToken();
+  govToken.mint(USER, INITIAL_SUPPLY);
+
+  vm.startPrank(USER);
+  govToken.delegate(USER);
+  timelock = new Timelock(MIN_DELAY, proposers, executors);
+  governor = new MyGovernor(govToken, timelock);
+
+  bytes32 proposerRole = timelock.PROPOSER_ROLE();
+  bytes32 executorRole = timelock.EXECUTOR_ROLE();
+  bytes32 adminRole = timelock.TIMELOCK_ADMIN_ROLE();
+
+  timelock.grantRole(proposerRole, address(governor));
+  timelock.grantRole(executorRole, address(0));
+  timelock.revokeRole(adminRole, USER);
+  vm.stopPrank();
+}
+```
+
+The last thing we need to consider in our setUp is our little Box contract! Once deployed, we need to assure that the `timelock` is set as the owner of this protocol. If you recall, the store function of our Box contract is access controlled. This is meant to be called by only our DAO. But, because our DAO (the governor contract) must always check with the timelock before executing anything, the timelock is what must be set as the address able to call functions on our protocol.
+
+```solidity
+box = new Box();
+box.transferOwnership(address(timelock));
+```
+
+Amazing! At this point we can jump right into our first simple test. Let's assure that only our timelock can call the `store` function.
+
+```solidity
+function testCantUpdateBoxWithoutGovernance() public {
+  vm.expectRevert();
+  box.store(1);
+}
+```
+
+All we need, let's run it as a sanity check!
+
+```bash
+forge test --mt testCantUpdateBoxWithoutGovernance
+```
+
+![MyGovernorTest](./assets/tests1.png)
+
+Beautiful!
+
+Alright, the next one will be a giant test function. This should demonstrate from a coding standing point how a DAO function from start to end. Let's go!
+
+```solidity
+function testGovernanceUpdatesBox() public {}
+```
+
+The function we're going to call is store, of course, so we'll declare the value we expect to pass. Beyond this, the first thing we'll need to do to kick off a vote is submit a proposal.
+
+```solidity
+function propose(addresses[] memory targets, uint256[] memory values, bytes[] memory calldatas, string memory descrription) public virtual override returns (uint256){...}
+```
+
+Many of these parameters we should already know. The target of our proposed function call is going to be our Box contract address, the value we're passing with the function call is zero, and the calldata is going to be our function signature encoded with our data. All things we've done before!
+
+```solidity
+function testGovernanceUpdatesBox() public {
+  uint256 valueToStore = 420;
+  string memory description = "Update box value to 420 for clout";
+  bytes memory encodedFunctionCall = abi.encodeWithSignature(
+    "store(uint256)",
+    valueToStore
+  );
+
+  calldatas.push(encodedFunctionCall);
+  values.push(0);
+  targets.push(address(box));
+}
+```
+
+> ❗ **NOTE**
+> You'll need to declare the constant variables `uint256[] values`, `bytes[] calldatas`, and `address[] targets` in your `MyGovernorTest.t.sol` contract!
+
+From this point we can call our propose function! propose returns a uint256 proposalId, which will be important for the next stages of our test.
+
+```solidity
+function testGovernanceUpdatesBox() public {
+  uint256 valueToStore = 420;
+  string memory description = "Update box value to 420 for clout";
+  bytes memory encodedFunctionCall = abi.encodeWithSignature(
+    "store(uint256)",
+    valueToStore
+  );
+
+  calldatas.push(encodedFunctionCall);
+  values.push(0);
+  targets.push(address(box));
+
+  // 1. Propose
+  uint256 proposalId = governor.propose(
+    targets,
+    values,
+    calldatas,
+    description
+  );
+}
+```
+
+It might be a good idea for our test to check the state of the proposal that's been submitted! We can do this by calling the `state` function with our proposalId. This call will return a uint256 which pertains to an index of the ProposalState enum.
+
+```solidity
+abstract constract IGovernor is IERC165 {
+    enum ProposalState {
+        Pending,
+        Active,
+        Canceled,
+        Defeated,
+        Succeeded,
+        Queued,
+        Expired,
+        Executed
+    }
+    ...
+}
+```
+
+We can check the state with the following:
+
+```solidity
+// View the State
+console.log("Proposal State 1: ", uint256(governor.state(proposalId)));
+```
+
+We would expect this to return `0`, which indicates that the proposal is pending, this is because the Timelock Controller is enforcing a delay before voting on a proposal. We'll need to simulate the passage of time using the vm.warp and vm.roll cheatcodes Foundry offers before we can see our state change. We'll also need to declare a VOTING_DELAY constant and assign this to 1. This will represent 1 block delay before voting is authorized.
+
+```solidity
+contract MyGovernorTest is Test {
+    ...
+    uint256 public constant VOTING_DELAY = 1 // # of blocks until vote is active
+    ...
+    function testGovernanceUpdatesBox() public {
+        ...
+        // View the State
+        console.log("Proposal State 1: ", uint256(governor.state(proposalId)));
+        vm.warp(block.timestamp + VOTING_DELAY + 1);
+        vm.roll(block.number + VOTING_DELAY + 1);
+        console.log("Proposal State 2: ", uint256(governor.state(proposalId)));
+    }
+}
+```
+
+With this, we can finally cast a vote on the proposal! I'm going to leverage the castVoteWithReason function, but feel free to try some of the other variations of vote casting for practice! Importantly, a vote cast must adhere to one of the vote types to be valid/counted.
+
+From the GovernorCountingSimple extension, the voting types are defined as:
+
+```solidity
+enum VoteType {
+  Against, // 0
+  For, // 1
+  Abstain // 2
+}
+```
+
+So, in order for our test to vote _in favour_ of a proposal, we need to pass `1` as our vote parameter in the function we're calling.
+
+```solidity
+// 2. Vote
+string memory reason = "420 is cool number. Cool number for cool people.";
+
+vm.prank(USER);
+governor.castVoteWithReason(proposalId, 1, reason);
+```
+
+Now that the votes are cast, we'll need to advance time again. Our voting period has been defaulted to 1 week (50400 blocks), let's create this constant and move time forward accordingly.
+
+```solidity
+contract MyGovernorTest is Test {
+    ...
+    uint256 public constant VOTING_PERIOD = 50400;
+    ...
+    function testGovernanceUpdatesBox() public {
+        ...
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+        vm.roll(block.number VOTING_PERIOD + 1);
+    }
+}
+```
+
+Once the VOTING_PERIOD has elapsed, a successful proposal needs to be queued before it executes. The queue function, we remember, requires all the same parameters of the original proposal (with the description having already been hashed). This function uses the parameters to derive the proposalId and verify that the proposal state reflects a successful proposal. Let's go ahead and queue our proposal now!
+
+After a proposal is queued, we'll of course need to advance time again to account for our Timelock's configured MIN_DELAY. This is the opportunity for stakeholders to exit their position if they don't agree with the DAOs decision!
+
+```solidity
+// 3. Queue the Proposal
+bytes32 descriptionHash = keccak256(abi.encodePacked(description));
+governor.queue(targets, values, calldatas, descriptionHash);
+
+vm.warp(block.timestamp + MIN_DELAY + 1);
+vm.roll(block.number + MIN_DELAY + 1);
+```
+
+FINALLY, after much anxiety and bated breath, our proposal hits the execute phase. Much like the queue function, the execute function requires the same parameters to verify the state of our proposalId before execution.
+
+```solidity
+// 4. Execute the Proposal
+governor.execute(targets, values, calldatas, descriptionHash);
+```
+
+Once executed, we have to verify that our proposed change _actually_ happened! We can now call the `retrieve` function on our Box and assert that the returned value is what we expect it to be!
+
+```solidity
+console.log("Box Value: ", box.retrieve());
+assert(box.retrieve() == valueToStore);
+```
+
+I know this written portion has been long and broken up (this test function is huge!), but here's the testGovernanceUpdatesBox test in its entirety for your reference:
+
+<details>
+<summary>testGovernanceUpdatesBox</summary>
+
+```solidity
+function testGovernanceUpdatesBox() public {
+  uint256 valueToStore = 420;
+  string memory description = "Update box value to 420 for clout";
+  bytes memory encodedFunctionCall = abi.encodeWithSignature(
+    "store(uint256)",
+    valueToStore
+  );
+  calldatas.push(encodedFunctionCall);
+  values.push(0);
+  targets.push(address(box));
+
+  // 1. Propose
+  uint256 proposalId = governor.propose(
+    targets,
+    values,
+    calldatas,
+    description
+  );
+
+  // View the State
+  console.log("Proposal State 1: ", uint256(governor.state(proposalId)));
+  vm.warp(block.timestamp + VOTING_DELAY + 1);
+  vm.roll(block.number + VOTING_DELAY + 1);
+  console.log("Proposal State 2: ", uint256(governor.state(proposalId)));
+
+  // 2. Vote on Proposal
+  string memory reason = "420 is cool number. Cool number for cool people.";
+
+  // Vote Types derived from GovernorCountingSimple:
+  // enum VoteType {
+  //   Against,
+  //   For,
+  //   Abstain
+  //}
+  vm.prank(USER);
+  governor.castVoteWithReason(proposalId, 1, reason);
+
+  vm.warp(block.timestamp + VOTING_PERIOD + 1);
+  vm.roll(block.number + VOTING_PERIOD + 1);
+
+  // 3. Queue the Proposal
+  bytes32 descriptionHash = keccak256(abi.encodePacked(description));
+  governor.queue(targets, values, calldatas, descriptionHash);
+
+  vm.warp(block.timestamp + MIN_DELAY + 1);
+  vm.roll(block.number + MIN_DELAY + 1);
+
+  // 4. Execute the Proposal
+  governor.execute(targets, values, calldatas, descriptionHash);
+  console.log("Box Value: ", box.retrieve());
+  assert(box.retrieve() == valueToStore);
+}
+```
+
+</details>
+
+Woo! This is exciting, we're ready to run the test.
+
+```bash
+forge test --mt testGovernanceUpdatesBox -vvv
+```
+
+![MyGovernorTest](./assets/tests2.png)
+
+## Wrap Up
+
+Oh. My. Goodness. This is really incredible! I know we went through this quickly, but at this point you're becoming a fairly sophisticated smart contract engineer. By now the repetition should be causing the familiarity with these building blocks to grow and every contract is a step in the direction towards even more experience.
+
+I mentioned a few times at the beginning, but if you want to go further with this, if you want to build a full sized protocol, I encourage you to look into some of the alternative voting methodologies that have been created.
+
+Putting voting power in the hands of those who can afford the most tokens is ... bad. So get out there and experiment with alternatives!
+
+In the next lesson we'll recap everything we've learnt in this section, see you soon!
