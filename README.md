@@ -1,90 +1,66 @@
-# Setup
+# Governance Tokens
 
-Alright, welcome back! Now that we have all this context and understanding of DAOs, it's time to try building one ourselves. The project we'll be building will be a DAO which employs an ERC20 governance token to allocate voting power and determine membership.
+As mentioned in the previous closing remarks, I suspect this will mostly be review, as we set up this token, so let's keep our momentum and jump right into it. Start with creating `src/GovToken.sol`. The token we'll use in this demonstration will be _so standard_ that we can just lean on **[OpenZeppelin's Contract Wizard](https://wizard.openzeppelin.com/)** and select `ERC20` and `votes`.
 
-While this is a very common/simple way to deploy a governance protocol, I want to challenge you not to default to this. It seems simple to deploy and manage at first, but issues inevitably arise when trading of governance tokens comes into play and speculation on price throws governance to the wind. This makes me sad so, I challenge you to find better solutions in your own projects.
+![OpenZeppelin Contract Wizard](./assets/governance-tokens1.png)
 
-> ❗ **IMPORTANT**
-> Don't make Patrick sad.
-
-You can of course find all the code we'll be writing in this lesson's **[GitHub Repo](https://github.com/Cyfrin/foundry-dao-f23)**.
-
-Let's begin!
-
-```bash
-mkdir foundry-dao-f23
-code foundry-dao-f23
-```
-
-In the new window, you know the drill, we should be pros by now.
-
-```bash
-forge init
-```
-
-Be sure to delete the example contracts, `src/Counter.sol`, `script/Counter.s.sol` and `test/Counter.t.sol`.
-
-With that, let's detail what we're going to accomplish.
-
-1. We are going to have a contract controlled by a DAO
-2. Every transaction that the DAO wants to send has to be voted on
-3. We will use ERC20 tokens for voting (bad model, please research better methodologies as you grow!)
-
-Great! Let's start with creating a minimal contract that allows voting. Start with a new file, `src/Box.sol`. The boiler plate here will be really similar to what we've done before, we'll have a few special imports for the functionality we want to include. We know we'll need OpenZeppelin's library, so we can absolutely start by installing this.
-
-```bash
-forge install openzeppelin/openzeppelin-contracts --no-commit
-```
-
-And naturally we can add our remapping...
-
-```toml
-remappings = ["@openzeppelin/contracts=lib/openzeppelin-contracts/contracts"]
-```
-
-The start of our contract should look very familiar.
+Copying this into our contract and we're already almost set (I've adjusted below to utilize named imports).
 
 ```solidity
 // SPDX-License-Identifier: MIT
+// Compatible with OpenZeppelin Contracts ^5.0.0
+pragma solidity ^0.8.20;
 
-pragma solidity ^0.8.18;
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { ERC20Permit } from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import { ERC20Votes } from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+contract GovToken is ERC20, ERC20Permit, ERC20Votes {
+  constructor() ERC20("GovToken", "GT") ERC20Permit("MyToken") {}
 
-contract Box is Ownable {}
-```
+  // The following functions are overrides required by Solidity.
 
-This contract is only going to serve as the contract which is managed by our DAO. In practice this contract could be quite complex, or multiple contracts could be managed by a single DAO, but for our purposes we'll keep things concise. The goal is to understanding how the voting mechanism allows the DAO to autonmously execute function calls.
-
-Let's add the ability to store and retrieve a value from our contract. The ability to change this number will be modifier with `onlyOwner` such that only our DAO may call it.
-
-```solidity
-// SPDX-License-Identifier: MIT
-
-pragma solidity ^0.8.18;
-
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-
-contract Box is Ownable {
-  uint256 private s_number;
-
-  event NumberChanged(uint256 number);
-
-  function store(uint256 newNumber) public onlyOwner {
-    s_number = newNumber;
-    emit NumberChanged(newNumber);
+  function _update(
+    address from,
+    address to,
+    uint256 value
+  ) internal override(ERC20, ERC20Votes) {
+    super._update(from, to, value);
   }
 
-  function getNumber() external view returns (uint256) {
-    return s_number;
+  function nonces(
+    address owner
+  ) public view override(ERC20Permit, Nonces) returns (uint256) {
+    return super.nonces(owner);
   }
 }
 ```
 
+Let's go over how this differs from a standard ERC20. Primarily it's the same base token contract with 2 extentions to the functionality, Permit and Votes.
+
+**ERC20Permit:**
+
+From the documentation:
+
+```solidity
+/* @dev Implementation of the ERC20 Permit extension allowing approvals to be made via signatures, as defined in
+ * https://eips.ethereum.org/EIPS/eip-2612[EIP-2612].
+```
+
+We won't go too deeply into this, but essentially it allows people to sign transactions without sending them, such that someone else can send it, paying for the gas.
+
+More interesting for us now is:
+
+**ERC20Votes:**
+
+ERC20Votes is "Compound-like" in how it implementing voting and delegation. It does a number of import things such as:
+
+- Keeps a checkpoint history of each account's voting power. Using snapshots of voting power is important, as assessing realtime voting power is susceptible to exploitation!
+  - Any time a token is bought, or transferred checkpoints are typically updated in a mapping with the user addresses involved
+- Allows the delegation of voting power to another entity while retaining possession of the tokens
+
 ## Wrap Up
 
-Easy. Nothing we've covered here should be new, it's all stuff we've seen before. This simple contract will be controlled by our DAO once deployed!
+That's all there really is to the governance token implementation we'll be employing. Some of the more complex functionality available through these extensions we won't be covered, but as always I encourage you to do your own exploration beyond the course material if you find yourself interested in learning more.
 
-In the next lesson we'll construct our ERC20 governance token. There isn't going to be anything extraordinary about this token, so building it out should be largely review.
-
-See you there!
+In the next lesson we'll start in on the main contract which will handle much of the protocol's administration, the Governor.
