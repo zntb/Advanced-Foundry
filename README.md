@@ -1,51 +1,90 @@
-# Aragon
+# Setup
 
-In this lesson we're guided by Juliette Chevalier in the process of creating a DAO through Aragon using _no code_.
+Alright, welcome back! Now that we have all this context and understanding of DAOs, it's time to try building one ourselves. The project we'll be building will be a DAO which employs an ERC20 governance token to allocate voting power and determine membership.
 
-Begin by navigating to **[app.aragon.org](https://app.aragon.org/)**. Once on the landing page you can connect a wallet and jump right into `Create your DAO`.
+While this is a very common/simple way to deploy a governance protocol, I want to challenge you not to default to this. It seems simple to deploy and manage at first, but issues inevitably arise when trading of governance tokens comes into play and speculation on price throws governance to the wind. This makes me sad so, I challenge you to find better solutions in your own projects.
 
-![Aragon Landing Page](./assets/aragon1.png)
+> ❗ **IMPORTANT**
+> Don't make Patrick sad.
 
----
+You can of course find all the code we'll be writing in this lesson's **[GitHub Repo](https://github.com/Cyfrin/foundry-dao-f23)**.
 
-You should be met with a wonderful breakdown of the steps we'll take to create our DAO, select `Build your DAO` again to continue.
+Let's begin!
 
-![Aragon Build DAO](./assets/aragon2.png)
+```bash
+mkdir foundry-dao-f23
+code foundry-dao-f23
+```
 
----
+In the new window, you know the drill, we should be pros by now.
 
-Next, you'll be asked to select a chain you expect to deploy on, with Sepolia available as a testnet.
+```bash
+forge init
+```
 
-![Aragon Select Chain](./assets/aragon3.png)
+Be sure to delete the example contracts, `src/Counter.sol`, `script/Counter.s.sol` and `test/Counter.t.sol`.
 
----
+With that, let's detail what we're going to accomplish.
 
-Following this you'll be tasked with describing some details of the DAO, giving it a name, logo and personality. This is also where links to DAO socials would be included such as LinkedIn, Twitter, Discord etc.
+1. We are going to have a contract controlled by a DAO
+2. Every transaction that the DAO wants to send has to be voted on
+3. We will use ERC20 tokens for voting (bad model, please research better methodologies as you grow!)
 
-![Aragon DAO Details](./assets/aragon4.png)
+Great! Let's start with creating a minimal contract that allows voting. Start with a new file, `src/Box.sol`. The boiler plate here will be really similar to what we've done before, we'll have a few special imports for the functionality we want to include. We know we'll need OpenZeppelin's library, so we can absolutely start by installing this.
 
----
+```bash
+forge install openzeppelin/openzeppelin-contracts --no-commit
+```
 
-Next is all about defining membership and who/how governance is allocated. In this stage you can decide the details of a new ERC20 governance token and to whom they are minted, or even import an existing token that the community can use.
+And naturally we can add our remapping...
 
-![Aragon Membership](./assets/aragon5.png)
+```toml
+remappings = ["@openzeppelin/contracts=lib/openzeppelin-contracts/contracts"]
+```
 
----
+The start of our contract should look very familiar.
 
-From here, we need to define the specific, granular details pertaining to how governance and proposals are handled by the protocol. These details include the threshold needed for successful proposals, duration to vote, who can create proposals etc.
+```solidity
+// SPDX-License-Identifier: MIT
 
-![Aragon Governance](./assets/aragon7.png)
+pragma solidity ^0.8.18;
 
----
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
-And finally, we need to verify our configurations before deployment! Importantly, all of our configurations can be adjusted after deployment with a successful proposal (with the exception of the blockchain we're deployed on).
+contract Box is Ownable {}
+```
 
-![Aragon Verify](./assets/aragon6.png)
+This contract is only going to serve as the contract which is managed by our DAO. In practice this contract could be quite complex, or multiple contracts could be managed by a single DAO, but for our purposes we'll keep things concise. The goal is to understanding how the voting mechanism allows the DAO to autonmously execute function calls.
 
----
+Let's add the ability to store and retrieve a value from our contract. The ability to change this number will be modifier with `onlyOwner` such that only our DAO may call it.
 
-And that's it! In less than 2 minutes you can have a functional DAO protocol deployed and ready to take proposals. Aragon even offers an on-platform dashboard to manage the DAO and oversee membership and engagement.
+```solidity
+// SPDX-License-Identifier: MIT
 
-I highly encourage you to take a look at the service yourself!
+pragma solidity ^0.8.18;
 
-Thanks Juliette!
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+
+contract Box is Ownable {
+  uint256 private s_number;
+
+  event NumberChanged(uint256 number);
+
+  function store(uint256 newNumber) public onlyOwner {
+    s_number = newNumber;
+    emit NumberChanged(newNumber);
+  }
+
+  function getNumber() external view returns (uint256) {
+    return s_number;
+  }
+}
+```
+
+## Wrap Up
+
+Easy. Nothing we've covered here should be new, it's all stuff we've seen before. This simple contract will be controlled by our DAO once deployed!
+
+In the next lesson we'll construct our ERC20 governance token. There isn't going to be anything extraordinary about this token, so building it out should be largely review.
+
+See you there!
