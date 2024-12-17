@@ -1,102 +1,26 @@
-# Recap
+# Security & Auditing Introduction
 
-We did it, we made it to the end! We only have one more section left in this course, Security. _**Do not**_ skip this final section. Even if you don't continue into a security focused career, I want you to have the fundamental knowledge of what to look out for, common strategies to keep your protocol safe and where you can look for help when you need it.
+Welcome back! This is our final lesson in this course and we're ending on a thrilling note - diving into the world of **smart contract security and auditing**.
 
-For those that _do_ want to go down the security/auditing path. Updraft has a **[course tuned to you](https://updraft.cyfrin.io/courses/security)**, ready and waiting.
+Remember, this is _just a teaser_ and won't cover everything about security, nonetheless, we'll ensure you're armed with the fundamentals to keep your protocol secure and that you know where to ask for help when you need it and it's time to deploy.
 
-## BONUS: Gas Optimizations with GaslightGG
+Let's start with some scary statistics to demonstrate the motivations behind improving Web3 security.
 
-As a bonus piece of content, Harrison with Gaslight shares his advice on increasing the gas efficiency of your smart contracts!
+In 2022, according to data from Chainalysis there were $3.8 Billion work of hacks in crypto, $3.1 Billion from DeFi specifically. To put this into perspective, according to DeFi Llama, as of recording, there's \$47.5 Billion TVL in all of DeFi. This means a staggering 6.5% of all the money in DeFi was hacked/stolen.
 
-To showcase a common waste of gas in smart contract development, we reference a simple air drop contract:
+That's insane. Imagine a bank telling you there was a 6% chance that everything you deposit will be gone next year.
 
-```solidity
-contract BadAirdrop {
-  address token;
-  uint256 public transfers;
+There's a popular website, **[rekt.news](https://rekt.news/)** which tracks crypto hacks and even has a leaderboard ranking the largest hacks of all time. What's so shocking (or not shocking) is how many of these hacked protocols went unaudited.
 
-  error invalidLengths();
+This is unacceptable! Security needs to be an active part of any developers deployment plan and this includes a thorough review of their code.
 
-  constructor(address _token) {
-    token = _token;
-  }
+> ❗ **PROTIP**
+> Spending $2M on Security > $200M Hack
 
-  function airdropBad(
-    address[] memory recipients,
-    uint256[] memory amounts
-  ) public {
-    if (recipients.length != amounts.length) revert invalidLengths();
-    for (uint256 i; i < recipients.length; i++) {
-      IERC20(token).transferFrom(msg.sender, address(this), amounts[i]);
-    }
+## Wrap Up
 
-    for (uint256 i; i < recipients.length; i++) {
-      IERC20(token).transfer(recipients[i], amounts[i]);
-      transfers++;
-    }
-  }
-}
-```
+With all this said, any developer serious about launching a protocol needs to be serious about security and this includes likely getting an audit.
 
-Loops in solidity are hugely gas intensive. In our airdrop function, even to just transfer the airdrop amount from the sender to the contract we're iterating through the entire recipients.length.
+In the next lesson we're going to discuss what a smart contract audit is, and how developers can prepare for an audit when they're getting ready to deploy.
 
-We're then iterating through the array again to transfer from the contract to the recipients, and in addition to this, we're incrementing our transfer variable each time we loop through the array.
-
-There are lots of improvements possible here. Let's look at a more ideal example.
-
-```solidity
-contract GoodAirdrop {
-  address public immutable token;
-  uint256 public transfers;
-
-  error InvalidLengths();
-
-  constructor(address _token) {
-    token = _token;
-  }
-
-  function airdropGood(
-    address[] calldata recipients,
-    uint256[] calldata amounts,
-    uint256 totalAmount
-  ) public {
-    if (recipients.length != amounts.length) revert InvalidLengths();
-
-    IERC20(token).transferFrom(msg.sender, address(this), totalAmount);
-
-    for (uint256 i; i < recipients.length; ) {
-      IERC20(token).transfer(recipients[i], amounts[i]);
-
-      unchecked {
-        ++i;
-      }
-    }
-
-    unchecked {
-      transfers += recipients.length;
-    }
-  }
-}
-```
-
-Some of the adjustments to this contract which improve gas efficiency include:
-
-- token variable is now immutable, this is deployed with the contract bytecode and is cheaper to read from than storage.
-- arguments passed to the `airdropGood` function have been changed to calldata
-- totalAmount has been added as a parameter to the function. This will remove a large amount of gas by not needing to loop through recipients to calculate it
-- the syntax of our for loop has been changed to allow us to use unchecked on our iterator, we can be confident in this number not overflowing so we can save gas on the check
-- the update to our transfers variable is no longer contained in a loop and is also unchecked. We set this once based on the length of the recipients array.
-
-What does all of this mean for the gas spent with this contract?
-
-![GaslightGG](./assets/recap1.png)
-
-Over 600,000 gas savings! Simple changes and gas conscious development is all it takes!
-
-🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊
-
-**[Arbitrum NFT Challenge](https://arbiscan.io/address/0xc584bD01fD60F671409661a6802170BbEFba5c47#code)**
-
-**[Sepolia NFT Challenge](https://sepolia.etherscan.io/address/0x46F3fE2C8aC9e9AE4DEDE1a7a29Ab3BdcFa7eaFc#code)**
-
-🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊
+See you there!
