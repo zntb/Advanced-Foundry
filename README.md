@@ -1,34 +1,53 @@
-# Congratulations
+# Cross Chain Rebase Tokens
 
-Welcome back, you've made it to the end of this course! We've covered an enormous amount of content and you should be incredibly proud.
+## Introduction To Cross Chain Rebase Tokens
 
-To those looking to become smart contract security professions, I have some resources that I recommend you check out next.
+We are going to be exploring everything to do with cross chain and we are going to be building a rebase token that works cross chain. Don't worry, we're going to go into more about what this means. What does it mean to be cross chain? What is a rebase token? We are going to cover everything. In this section, you are going to learn about Chainlink CCIP, how to enable a token for CCIP, how to create custom tokens for CCIP, how to create a rebased token, and more specific things like using the "super" keyword.
 
-- **[Solidity Security: Comprehensive list of known attack vectors and common anti-patterns](https://blog.sigmaprime.io/solidity-security.html)**
-  - This site details a huge number of security vulnerabilities in this space that you should absolutely know about
-- **[Damn Vulnerable Defi](https://www.damnvulnerabledefi.xyz/)**
-  - Tincho himself offers this gamified avenue to practice smart contract security and to experience attack vectors first hand
-- **[Ethernaut](https://ethernaut.openzeppelin.com/)**
-  - OpenZeppelin offers another great gamified platform to learn smart contract vulnerabilities
-- **[Solodit](https://solodit.xyz/)**
-  - An amazing platform that aggregates audit reports from the top auditors and firms in the industry. This is _**the**_ place to see how it's done in the real world.
-- **[Cyfrin](https://www.cyfrin.io/)**
-  - Anyone building their own protocol who needs an audit can of course always check out our auditing platform, Cyfrin.
-- **[Updraft Security & Auditing Course](https://updraft.cyfrin.io/courses/security)**
-  - Since the creation of the Foundry course Updraft has launched a dedicated Security & Auditing curriculum, anyone serious about security in the space needs to check it out.
+First of all, we are going to be creating a rebase token.
 
-Whew, a sincere congratulations for making it through this course. Myself and the entire Web3 community are glad to have you along, empowered to contribute and build the things you want to make a reality.
+```solidity
+// SPDX-License-Identifier: MIT
 
-People always ask _**Where do I go now? What do I do with all this new found knowledge?**_
+pragma solidity ^0.8.24;
 
-Well, I've left some links with further resources above, but the best thing you can do for yourself is to take what you've learnt and **apply it**. Build something cool, contribute to GitHub Repos, participate in hackathons, apply for jobs. Make mistakes and learn as you go. A constant stream of tutorials will not reinforce the confidence in yourself and in your abilities necessary to succeed.
+import "./ERC20.sol";
+import "./openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import "./AccessControl.sol";
+import "./openzeppelin-contracts/contracts/access/AccessControl.sol";
+import "./AccessControl.sol";
 
-🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊
+// gitignore
 
-**[Sepolia NFT Challenge](https://sepolia.etherscan.io/address/0x766a74f8924C7B07df088fDB0F7D7DbaDd330Fb3#code)**
+// test
 
-**[Arbitrum NFT Challenge](https://arbiscan.io/address/0xa0c7ADA2c7c29729d12e2649BC6a0a293Ac46725#code)**
+// github-workflows
 
-🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊🎊
+// bridgeToZkSync.sh
 
-Thank you for everything! See you in Web3!
+// foundry.toml
+
+// remappings.txt
+```
+
+We are going to create a lot of different functions, but the main ones to point out are this funky balance of function which rather than just returning the value from the mapping's balances, we are instead calculating the balance based on some interest. Notice here, we are also going to be learning what it means to use this "super" keyword. We are going to have some funky mint and burn functions, which include a way to mint accrued interest. We are going to learn how to calculate linear interest for a token.
+
+We will then build a token pool for our tokens to issue tokens cross chain using a burn and mint mechanism where the tokens are burnt on the source chain and minted on the destination chain. And this token pool will facilitate that token transfer. We will create a vault in order to be able to deposit ETH and then gain rebase tokens. And then also to be able to redeem our rebase tokens for ETH.
+
+We will create some scripts to be able to deploy our contracts, do the CCIP configuration, and bridge those tokens cross chain. We will also be creating fuzz tests for our rebase token using new assertions like "assertApproxEqualAbsolute". We will also be creating fork tests and using Chainlink Local to be able to test CCIP locally, using "createFork" and CCIP Local Simulator fork.
+
+We will then be using a bash script to deploy our tokens, do the CCIP configuration, mint some tokens, and transfer them across chain from Sepolia to ZkSync Sepolia.
+
+```bash
+forge script ./script/sol/Deployers.sol --rpc-url $SEPOLIA_RPC_URL --account updraft --broadcast
+```
+
+```bash
+forge script ./script/sol/ConfigurePool.sol --rpc-url $SEPOLIA_RPC_URL --account updraft --broadcast --sig "run/address:updateInterestRate(uint256,bytes)" --run-address $SEPOLIA_POOL_ADDRESS
+```
+
+```bash
+forge script ./script/sol/BridgeTokens.sol --rpc-url $SEPOLIA_RPC_URL --account updraft --broadcast --sig "sendMessage(uint256,bytes)" --message "uint256" $SEPOLIA_POOL_ADDRESS $ZK_SYNC_SEPOLIA_POOL_ADDRESS
+```
+
+So, if you're excited to learn what a rebase token is, and how to create cross chain tokens using CCIP, how to send cross chain messages, and everything to do with bridging cross chain transfers, CCIP, and rebase tokens then this is the right place for you, and let's get started.
