@@ -1,34 +1,147 @@
-# Introduction to Rebase Tokens
+# Writing the Token Code
 
-We are going to create a cross-chain rebase token and will be using CCIP.
+Okay, so now that we've explained what we're going to do, let's go ahead and do it. We need to create a file, which we will call `RebaseToken.sol`. Then, we'll add the SPDX license identifier:
 
-Let's start by making a directory:
-
-```bash
-mkdir ccip-rebase-token
+```Solidity
+// SPDX-License-Identifier: MIT
 ```
 
-Now, let's go inside this directory and create a Forge:
+Next, we will add the solidity version.
 
-```bash
-cd ccip-rebase-token
-forge init
+```Solidity
+pragma solidity ^0.8.24;
 ```
 
-We will walk through the smart contract step by step.
+Then, we create our contract:
 
-In the README.md file, we will first write out the basic concept of our rebase token. It will consist of three key points:
+```Solidity
+contract RebaseToken {
 
-1. A protocol that allows users to deposit into a vault and in return, receive rebase tokens that represent their underlying balance.
+}
+```
 
-2. The rebase token's balance of function is dynamic to show the changing balance with time.
+Now, the next thing we're going to do is install OpenZeppelin because we are going to use the ERC20 contract from OpenZeppelin. So we can run the following command to install the dependency:
 
-3. The protocol sets an interest rate for each user based on some global interest rate of the protocol at the time the user deposits into the vault.
+```bash
+forge install openzeppelin/openzeppelin-contracts@v5.1.0 --no-commit
+```
 
-We will set the interest rate such that the global interest rate can only decrease over time to incentivize early adopters.
+It is always a good idea to get the exact path to the dependency we are going to install, so let's search in the browser by searching for "openzeppelin github". This will take us to their github page, and we can find the latest release of the library, which is 5.1.0.
 
-A user deposits into the vault smart contract, the vault contract calls the rebase token and the rebase token mints rebase tokens for the user equal to the amount that they deposited. The user's interest rate is set based on the global interest rate.
+Once we have the correct version and path, we can add it to our rebase token. Then, we are going to include our named import.
 
-Let's say the global interest rate is 0.05% per day and a user deposits. They are given an interest rate of 0.05%. Then, let's say the global interest rate drops to 0.04%. A second user makes a deposit. They inherit the global interest rate of 0.04%, but the first user maintains their interest rate of 0.05%.
+```Solidity
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+```
 
-Now that we have a basic understanding of our rebase token design, let's go ahead and write the smart contract.
+Now we need to make sure that we also set up our `foundry.toml` file with remappings:
+
+```Solidity
+remappings = [
+    "@openzeppelin/=lib/openzeppelin-contracts/"
+]
+```
+
+So we can now inherit from the ERC20 contract:
+
+```Solidity
+contract RebaseToken is ERC20 {
+
+}
+```
+
+Now that we are inheriting from this ERC20 contract, we can create a constructor.
+
+```Solidity
+ constructor() ERC20("Rebase Token", "RBT") {
+
+}
+```
+
+We are also going to add a few nat spec comments.
+
+```Solidity
+    /*
+     * @title RebaseToken
+     * @dev A simple ERC20 token with a name, symbol, and 18 decimals.
+     */
+```
+
+```Solidity
+/*
+* @notice Mint the user tokens when they deposit into the vault
+* @param _to The user to mint the tokens to
+* @param _amount The amount of tokens to mint
+*/
+```
+
+```Solidity
+    /*
+     * @notice Calculate the interest that has accumulated since the last update
+     * @param _user The user to calculate the balance for
+     * @return The balance of the user including the interest that has accumulated in the time since the balance was last updated.
+     */
+```
+
+```Solidity
+    /*
+    * @dev The interest rate can only decrease
+
+    */
+```
+
+Next, we are going to create the function that sets the interest rate.
+
+```Solidity
+function setInterestRate(uint256 _newInterestRate) external {
+    // Set the interest rate
+
+
+}
+```
+
+Now we also want to be able to mint the accrued interest for each user. So we can create an internal function to calculate the interest that has accrued.
+
+```Solidity
+function _mintAccruedInterest(address _user) internal view {
+  // find their current balance of rebase tokens that have been minted to the user
+  // calculate their current balance including any interest
+
+
+}
+```
+
+We will need a function for a balance of.
+
+```Solidity
+function balanceOf(address user) public view virtual returns (uint256) {
+        return _balances[account];
+
+}
+```
+
+We will also create a function to return the linear interest.
+
+```Solidity
+function _calculateUserAccumulatedInterestSinceLastUpdate(address _user) internal view returns (uint256) {
+  // get the time since the last update
+  // calculate the interest that has accumulated since the last update
+  // this is going to be linear growth with time
+ //1. calculate the time since the last update
+    //2. calculate the amount of linear growth
+        //3. return the amount of linear growth
+
+}
+```
+
+Finally, we can add the state variable for the user's interest rate, as well as initialize it.
+
+```Solidity
+    uint256 private constant PRECISION_FACTOR = 1e18;
+    uint256 private s_interestRate = 5e10;
+    mapping (address => uint256) private s_userInterestRate;
+
+     mapping (address => uint256) private s_lastUpdatedTimestamp;
+```
+
+At this point in the video, we have the basic setup of our contract, with OpenZeppelin installed, remappings defined, and our first state and view functions. We are now on our way to completing our rebase token.
