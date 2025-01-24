@@ -1,147 +1,91 @@
-# Writing the Token Code
+# Mintinterest And-burn-functions
 
-Okay, so now that we've explained what we're going to do, let's go ahead and do it. We need to create a file, which we will call `RebaseToken.sol`. Then, we'll add the SPDX license identifier:
+## Implementing the `mintInterest` and `burn` Functions
 
-```Solidity
-// SPDX-License-Identifier: MIT
+Okay, let's finish `mintAccruedInterest`, which is an internal function we are creating. This function will mint any interest that has accrued since the last time a user performed an action, such as minting, burning, bridging later, or transferring. When this action occurs, we'll mint the tokens using a specific function. Any interest that has accrued since the last time their actual principal balance of minted tokens was updated will be minted in this function.
+
+We previously walked through how we were going to do this. First, we will find their principal balance. How many tokens have actually been minted to them? Next, we will calculate their current balance, how many tokens they actually have including any interest accrued since the principle balance was updated last time. Then, we will calculate the number of tokens that need to be minted to the user, which is the difference between those two numbers. We'll call the internal `mint` function to mint the extra tokens, and set the user's last updated timestamp.
+
+So, the first step will be to find the principal balance, which will be the same as before:
+
+```solidity
+uint256 previousPrincipleBalance = super.balanceOf(_user);
 ```
 
-Next, we will add the solidity version.
+Next, we want to calculate their current balance, which will look like:
 
-```Solidity
-pragma solidity ^0.8.24;
+```solidity
+uint256 currentBalance = balanceOf(_user);
 ```
 
-Then, we create our contract:
+The current balance will include any interest that has accumulated. After that, we will calculate the interest that has accrued, or rather, the amount that their principal balance needs to increase by. This looks like:
 
-```Solidity
-contract RebaseToken {
+```solidity
+uint256 balanceIncrease = currentBalance - previousPrincipleBalance;
+```
 
+Now we'll set the user's last updated timestamp to the current time
+
+```solidity
+s_userLastUpdatedTimestamp[_user] = block.timestamp;
+```
+
+This is because the balance was last updated now. Then we'll do an internal call to mint the user the `balanceIncrease`.
+
+```solidity
+_mint(_user, balanceIncrease);
+```
+
+That's the mint function fully implemented.
+
+Now let's add some NatSpec to our internal function:
+
+```solidity
+/**
+ *@notice Mint the accrued interest to the user since the last time they interacted with the protocol (e.g. burn, mint, transfer)
+ *@param _user The user to mint the accrued interest to
+ */
+```
+
+We have now fully implemented `mintAccruedInterest`!
+
+We can see that we are using it in our `mint` function
+
+```solidity
+_mintAccruedInterest(_to);
+```
+
+to check whether a user has any interest accrued before we mint them tokens.
+
+Next we will move to implementing our burn function. This function is called when a user is redeeming their deposit and rewards. First, we are going to create our burn function:
+
+```solidity
+function burn(address _from, uint256 _amount) external {
+  _mintAccruedInterest(_from);
+  _burn(_from, _amount);
 }
 ```
 
-Now, the next thing we're going to do is install OpenZeppelin because we are going to use the ERC20 contract from OpenZeppelin. So we can run the following command to install the dependency:
+This function is called when we transfer tokens cross-chain.
 
-```bash
-forge install openzeppelin/openzeppelin-contracts@v5.1.0 --no-commit
+Let's add in some NatSpec here
+
+```solidity
+/**
+ *@notice Burn the user tokens when they withdraw from the vault
+ *@param _from The user to burn the tokens from
+ *@param _amount The amount of tokens to burn
+ */
 ```
 
-It is always a good idea to get the exact path to the dependency we are going to install, so let's search in the browser by searching for "openzeppelin github". This will take us to their github page, and we can find the latest release of the library, which is 5.1.0.
+This burn function will be called when the user redeems their rewards, and also their initial deposit. The burn function we�ve just created needs a way for the user to burn their entire balance, so let's add a little check:
 
-Once we have the correct version and path, we can add it to our rebase token. Then, we are going to include our named import.
-
-```Solidity
-import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-```
-
-Now we need to make sure that we also set up our `foundry.toml` file with remappings:
-
-```Solidity
-remappings = [
-    "@openzeppelin/=lib/openzeppelin-contracts/"
-]
-```
-
-So we can now inherit from the ERC20 contract:
-
-```Solidity
-contract RebaseToken is ERC20 {
-
+```solidity
+if (_amount == type(uint256).max) {
+  _amount = balanceOf(_from);
 }
 ```
 
-Now that we are inheriting from this ERC20 contract, we can create a constructor.
+This is a common pattern to use, in order to mitigate dust or any left over tokens. Then, we will redeem and burn their entire balance. This is something we often see in DeFi protocols such as AAVE V3.
 
-```Solidity
- constructor() ERC20("Rebase Token", "RBT") {
-
-}
-```
-
-We are also going to add a few nat spec comments.
-
-```Solidity
-    /*
-     * @title RebaseToken
-     * @dev A simple ERC20 token with a name, symbol, and 18 decimals.
-     */
-```
-
-```Solidity
-/*
-* @notice Mint the user tokens when they deposit into the vault
-* @param _to The user to mint the tokens to
-* @param _amount The amount of tokens to mint
-*/
-```
-
-```Solidity
-    /*
-     * @notice Calculate the interest that has accumulated since the last update
-     * @param _user The user to calculate the balance for
-     * @return The balance of the user including the interest that has accumulated in the time since the balance was last updated.
-     */
-```
-
-```Solidity
-    /*
-    * @dev The interest rate can only decrease
-
-    */
-```
-
-Next, we are going to create the function that sets the interest rate.
-
-```Solidity
-function setInterestRate(uint256 _newInterestRate) external {
-    // Set the interest rate
-
-
-}
-```
-
-Now we also want to be able to mint the accrued interest for each user. So we can create an internal function to calculate the interest that has accrued.
-
-```Solidity
-function _mintAccruedInterest(address _user) internal view {
-  // find their current balance of rebase tokens that have been minted to the user
-  // calculate their current balance including any interest
-
-
-}
-```
-
-We will need a function for a balance of.
-
-```Solidity
-function balanceOf(address user) public view virtual returns (uint256) {
-        return _balances[account];
-
-}
-```
-
-We will also create a function to return the linear interest.
-
-```Solidity
-function _calculateUserAccumulatedInterestSinceLastUpdate(address _user) internal view returns (uint256) {
-  // get the time since the last update
-  // calculate the interest that has accumulated since the last update
-  // this is going to be linear growth with time
- //1. calculate the time since the last update
-    //2. calculate the amount of linear growth
-        //3. return the amount of linear growth
-
-}
-```
-
-Finally, we can add the state variable for the user's interest rate, as well as initialize it.
-
-```Solidity
-    uint256 private constant PRECISION_FACTOR = 1e18;
-    uint256 private s_interestRate = 5e10;
-    mapping (address => uint256) private s_userInterestRate;
-
-     mapping (address => uint256) private s_lastUpdatedTimestamp;
-```
-
-At this point in the video, we have the basic setup of our contract, with OpenZeppelin installed, remappings defined, and our first state and view functions. We are now on our way to completing our rebase token.
+That's our burn function!
