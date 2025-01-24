@@ -1,93 +1,51 @@
-# Access Control
+# Vault And-natspec
 
-We will add some access control in our rebase token contract by using OpenZeppelin's `Ownable` and `AccessControl` contracts.
+## Creating the Vault Contract and Natspec Comments
 
-First, we will import `Ownable` and `AccessControl`.
-
-```solidity
-import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
-```
-
-Then, we will inherit `Ownable` and `AccessControl` in our contract declaration.
+Okay, let's quickly address our comments before we move on. Notice how our comments don't have nice pretty colors. That's not very helpful. We forgot to add the second star so:
 
 ```solidity
-contract RebaseToken is ERC20, Ownable, AccessControl {
+ /**
+ * @notice Set the interest rate in the contract
+ * @param _newInterestRate The new interest rate to set
+ * @dev The interest rate can only decrease
+
+ */
 ```
 
-Next, we will create a constant byte32 role called `MINT_AND_BURN_ROLE`.
+If we do a slash star star it will do nice colors for our natspecs.
 
 ```solidity
-bytes32 private constant MINT_AND_BURN_ROLE = keccak256("MINT_AND_BURN_ROLE");
+ /**
+  * @notice Get the principle balance of a user. This is the number of tokens that have currently been minted to the user, no
+  * @param _user The user to get the principle balance for
+  * @return The principle balance of the user
+
+ */
 ```
 
-In the constructor, we will grant the `MINT_AND_BURN_ROLE` to the message sender.
+We can go through and add this to all of the comments, the natspec comments on our functions. The next thing we need to do, is like we were saying earlier, we just closed our lib, we need to create the vault. This is going to be the place where our users come to deposit their ETH and then withdraw their ETH. It is also going to be the place where the rewards are going to be sent. It�s just, basically, a place to lock up all of the ETH in one place. So we're going to create a new file called:
 
 ```solidity
-constructor() ERC20("Rebase Token", "RBT") Ownable() AccessControl() {
-  _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-  _grantRole(MINT_AND_BURN_ROLE, msg.sender);
-}
+Vault.sol
 ```
 
-Now, we will create a function called `grantMintAndBurnRole` which will grant the `MINT_AND_BURN_ROLE` to an address.
+Then we need to add SPDX license identifier:
 
 ```solidity
-function grantMintAndBurnRole(
-  address account
-) external onlyRole(DEFAULT_ADMIN_ROLE) {
-  _grantRole(MINT_AND_BURN_ROLE, account);
-}
+// SPDX-License-Identifier: MIT
 ```
 
-We will also add the `onlyRole` modifier to our `mint` and `burn` functions.
+Then we'll add our pragma solidity version:
 
 ```solidity
-function mint(
-  address to,
-  uint256 amount
-) external onlyRole(MINT_AND_BURN_ROLE) {
-  mintAccruedInterest(to);
-  _mint(to, amount);
-}
-
-function burn(
-  address from,
-  uint256 amount
-) external onlyRole(MINT_AND_BURN_ROLE) {
-  if (amount == type(uint256).max) {
-    amount = balanceOf(from);
-  }
-  mintAccruedInterest(from);
-  _burn(from, amount);
-}
+pragma solidity ^0.8.24;
 ```
 
-We will also add the `onlyRole` modifier to our `setInterestRate` function.
+Now, we can start writing the contract:
 
 ```solidity
-function setInterestRate(
-  uint256 newInterestRate
-) external onlyRole(DEFAULT_ADMIN_ROLE) {
-  if (newInterestRate <= s_interestRate) {
-    revert RebaseToken__InterestRateCanOnlyDecrease(
-      s_interestRate,
-      newInterestRate
-    );
-  }
-  s_interestRate = newInterestRate;
-  emit InterestRateSet(newInterestRate);
-}
+contract Vault {}
 ```
 
-We will also create a function called `grantRole` that will grant the specified role to an account.
-
-```solidity
-function grantRole(
-  bytes32 role,
-  address account
-) public virtual onlyRole(getRoleAdmin(role)) {
-  _grantRole(role, account);
-}
-```
+We are going to need to pass the token address to the constructor so we can mint and burn. We need to create a deposit function that mints tokens to the user and a redeem function that burns tokens from the user and sends the user the ETH. We also need a way to add rewards to the vault.
