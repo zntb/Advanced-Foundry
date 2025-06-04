@@ -1,210 +1,241 @@
-# Deploy Token-test
+# CCIP Setup-test
 
-## Deploying Your First Cross-Chain Tokens with Chainlink CCIP in Foundry
+## Setting Up Your CCIP Test Environment in Foundry
 
-This lesson guides you through the initial steps of deploying and configuring smart contracts for a cross-chain token (CCT) setup using Chainlink CCIP. We'll be working within a Foundry testing environment, simulating a multi-chain scenario with Sepolia as our source chain and Arbitrum Sepolia as our destination chain. Our goal is to lay the groundwork for enabling tokens to move seamlessly between these two networks.
+This lesson guides you through the initial steps of establishing a Chainlink CCIP (Cross-Chain Interoperability Protocol) test environment using Foundry. We'll focus on deploying the necessary contracts—specifically a `RebaseToken`, a `Vault`, and `TokenPool` contracts—on two simulated chains: Sepolia (as the source chain) and Arbitrum Sepolia (as the destination chain). We will also configure the essential roles and links required for these contracts to interact within the CCIP framework.
 
-We'll be following the Chainlink Cross-Chain Token (CCT) standard, as detailed in the Chainlink DevHub documentation (specifically under "CCIP -> Guides -> Cross-Chain Token (CCT) standard -> Register from an EOA (Burn & Mint) -> Foundry (Burn & Mint)"). This standard involves deploying tokens, potentially a vault for managing token supply (e.g., locking/burning), and token pools, then configuring them for cross-chain transfers.
+## Initial Project Compilation and Resolving Type Errors
 
-## Understanding Your Cross-Chain Environment
+We begin by attempting to compile our Foundry project. This is a standard first step to ensure our smart contracts are syntactically correct and all dependencies are properly resolved.
 
-Before diving into code, let's clarify the key components:
-
-- **Source Chain (Sepolia):** This is where our primary token (`RebaseToken`) and a `Vault` contract (for a burn/mint or lock/unlock mechanism) will reside. A token pool will also be deployed here later.
-
-- **Destination Chain (Arbitrum Sepolia):** This chain will host a corresponding `RebaseToken` (representing the token on this chain, typically minted) and its own token pool.
-
-- **Foundry:** We're using Foundry, a powerful toolkit for Ethereum smart contract development, to simulate this multi-chain environment. Foundry's cheat codes allow us to create forks of existing networks, switch between them, deploy contracts, and impersonate accounts, all within a local test.
-
-- **Owner Account:** A designated `owner` address will be responsible for deploying contracts and performing administrative actions. This ensures controlled management of the CCT setup.
-
-Our deployment order in this segment will be:
-
-1. `RebaseToken` on Sepolia.
-2. `RebaseToken` on Arbitrum Sepolia.
-3. `Vault` on Sepolia.
-
-Token pools will be addressed in subsequent steps.
-
-## Setting Up Your Foundry Test Environment: `CrossChainTest.sol`
-
-We begin by preparing our Foundry test contract, typically named something like `CrossChainTest.sol`.
-
-### Declaring State Variables
-
-First, we declare state variables to hold instances of our deployed contracts and fork identifiers. This allows us to interact with them throughout our tests.
+Executing `forge build` might initially lead to a compilation error. A common issue encountered is:
+`Error (9640): Explicit type conversion not allowed from "contract RebaseToken" to "contract IRebaseToken"`.
+This error typically points to a line in your test setup, for example, within the `setup()` function when instantiating a `Vault` contract:
 
 ```solidity
-// In CrossChainTest.sol
-// ... (import statements for Ownable, RebaseToken, Vault, IRbaseToken, etc.)
+// Original problematic line in test/CrossChain.t.sol
+vault = new Vault(IRebaseToken(sepoliaToken));
+```
 
-contract CrossChainTest is
-  Test // Assuming `Test` is from forge-std
-{
-  uint256 sepoliaFork;
-  uint256 arbSepoliaFork;
+The root cause is that Solidity sometimes struggles with direct type casting from a concrete contract implementation (e.g., `RebaseToken`) to an interface it implements (e.g., `IRebaseToken`), especially if the compiler cannot implicitly verify the cast due to complex inheritance structures or how types are passed.
 
-  CCIPLocalSimulatorFork ccipLocalSimulatorFork;
+To resolve this, an intermediate cast to `address` is required. This explicitly tells the compiler that you are aware of the underlying address and are then casting that address to the desired interface type:
 
-  RebaseToken sepoliaToken;
-  RebaseToken arbSepoliaToken;
-  Vault vault; // Vault will only be on the source chain (Sepolia)
-  // TokenPools would be declared here later
+```solidity
+// Corrected line
+vault = new Vault(IRebaseToken(address(sepoliaToken)));
+```
 
-  address owner;
-  // ...
+After applying this fix and successfully compiling, our initial setup should have the following contracts deployed:
+
+- `sepoliaToken` (an instance of `RebaseToken`) deployed on the Sepolia fork.
+
+- `vault` (an instance of `Vault`) deployed on the Sepolia fork, configured with the address of `sepoliaToken`.
+
+- `arbSepoliaToken` (an instance of `RebaseToken`) deployed on the Arbitrum Sepolia fork.
+
+## Deploying Token Pool Contracts for CCIP
+
+With our basic contracts deployed, the next crucial step, following the Chainlink CCIP documentation (specifically, "Enable your tokens in CCIP (Burn & Mint): Register from an EOA using Foundry"), is to deploy Token Pool contracts. These contracts are essential for managing the burn/lock and mint/unlock mechanics of tokens in CCIP.
+
+First, we'll declare state variables in our test contract (`CrossChainTest.sol`) for these pools:
+
+```solidity
+RebaseTokenPool sepoliaPool;
+RebaseTokenPool arbSepoliaPool;
+```
+
+To instantiate these `RebaseTokenPool` contracts, we need to identify their constructor arguments. Our `RebaseTokenPool.sol` likely inherits from Chainlink's base `TokenPool` contract. The constructor for `TokenPool` typically requires:
+
+- `IERC20 _token`: The ERC20 token that this pool will manage.
+
+- `address[] memory _allowlist`: A list of addresses permitted to use this pool. An empty array `[]` signifies that anyone can use it.
+
+- `address _rmnProxy`: The address of the Risk Management Network (RMN) proxy contract for the respective chain.
+
+- `address _router`: The address of the CCIP Router contract for the respective chain.
+
+These RMN Proxy and Router addresses are chain-specific and vital for CCIP operations. For local testing with Foundry, Chainlink provides the `CCIPLocalSimulatorFork` contract. This simulator contract exposes a function `getNetworkDetails(uint256 chainId)` which returns a `Register.NetworkDetails` struct. This struct conveniently packages various critical addresses for a given chain, including `routerAddress` and `rmnProxyAddress`.
+
+To use this, we need to import `CCIPLocalSimulatorFork` and the `Register` struct (which contains the `NetworkDetails` definition) from `@chainlink-local/src/ccip/CCIPLocalSimulatorFork.sol`:
+
+```solidity
+import { CCIPLocalSimulatorFork, Register } from "@chainlink-local/src/ccip/CCIPLocalSimulatorFork.sol";
+```
+
+We'll also add state variables to store these network details:
+
+```solidity
+Register.NetworkDetails sepoliaNetworkDetails;
+Register.NetworkDetails arbSepoliaNetworkDetails;
+```
+
+In our `setup()` function, we populate these structs by first selecting the appropriate fork using `vm.selectFork()` and then calling `getNetworkDetails()`. The `block.chainid` will automatically provide the correct chain ID of the currently selected fork:
+
+```solidity
+// Inside setup()
+
+// Select Sepolia fork
+vm.selectFork(sepoliaFork);
+sepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+
+// Select Arbitrum Sepolia fork
+vm.selectFork(arbSepoliaFork);
+arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+```
+
+Finally, we can deploy the token pools. We'll need to import `IERC20` from OpenZeppelin to correctly cast our token contract addresses to the `IERC20` interface type expected by the `RebaseTokenPool` constructor:
+
+```solidity
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+```
+
+Now, we deploy the pools using the retrieved network details and our token instances:
+
+```solidity
+// Inside setup(), after getting sepoliaNetworkDetails
+vm.selectFork(sepoliaFork); // Ensure correct fork is selected
+sepoliaPool = new RebaseTokenPool(
+    IERC20(address(sepoliaToken)),       // Cast token via address
+    new address[](0),                   // Empty allowlist
+    sepoliaNetworkDetails.rmnProxyAddress,
+    sepoliaNetworkDetails.routerAddress
+);
+
+// Inside setup(), after getting arbSepoliaNetworkDetails
+vm.selectFork(arbSepoliaFork); // Ensure correct fork is selected
+arbSepoliaPool = new RebaseTokenPool(
+    IERC20(address(arbSepoliaToken)),     // Cast token via address
+    new address[](0),                     // Empty allowlist
+    arbSepoliaNetworkDetails.rmnProxyAddress,
+    arbSepoliaNetworkDetails.routerAddress
+);
+```
+
+## Granting Mint and Burn Roles to Key Contracts
+
+For the CCIP Burn-and-Mint token transfer mechanism to function, the `TokenPool` contract associated with a token must have permission to mint new tokens (on the destination chain) and burn existing tokens (on the source chain). Our `RebaseToken.sol` should have a mechanism to grant these permissions, typically via a role-based access control system. Let's assume it has a `grantMintAndBurnRole` function:
+
+```solidity
+// Example function in RebaseToken.sol
+function grantMintAndBurnRole(address _account) external onlyOwner {
+  _grantRole(MINT_AND_BURN_ROLE, _account); // MINT_AND_BURN_ROLE is a bytes32 identifier
 }
 ```
 
-Notice `vault` is singular, as it's intended only for the source chain in this burn-and-mint example.
-
-### Creating the Owner Account
-
-We need an owner account to deploy contracts and manage permissions. Foundry's `vm.makeAddr()` cheat code is perfect for creating a consistent address for testing.
+Within our `setup()` function, while pranking as the owner of the tokens (using `vm.startPrank(owner)`), we grant these roles. The `Vault` contract might also require these roles for its operations, so we'll grant it permissions on the Sepolia chain as well.
 
 ```solidity
-// Inside CrossChainTest.sol, at the contract level or in setUp()
-// address constant owner = makeAddr("owner"); // Incorrect: makeAddr is a runtime cheat code
-address owner = vm.makeAddr("owner"); // Correct way
+// Inside setup()
+
+// On Sepolia fork
+vm.selectFork(sepoliaFork);
+vm.startPrank(owner); // Assuming 'owner' is the deployer and owner of sepoliaToken
+sepoliaToken.grantMintAndBurnRole(address(vault));
+sepoliaToken.grantMintAndBurnRole(address(sepoliaPool));
+vm.stopPrank();
+
+// On Arbitrum Sepolia fork
+vm.selectFork(arbSepoliaFork);
+vm.startPrank(owner); // Assuming 'owner' is the deployer and owner of arbSepoliaToken
+arbSepoliaToken.grantMintAndBurnRole(address(arbSepoliaPool));
+vm.stopPrank();
 ```
 
-It's important to note that `vm.makeAddr()` is a runtime cheat code, so `owner` cannot be a `constant`. It's typically initialized in the `setUp()` function or directly as a state variable initialized using the cheat code. For clarity, we'll assume it's initialized so `owner` is available. If initializing directly as a state variable like `address owner = vm.makeAddr("owner");`, ensure your Foundry version supports this. Otherwise, assign it in `setUp()`.
+## Claiming and Accepting Token Administrator Roles for CCIP
 
-For this lesson, we'll assume `owner` is initialized as a state variable for simplicity:
+The next step outlined in the Chainlink documentation (Step 4) involves establishing the administrative control of your token within the CCIP system. This is a two-part process involving the `RegistryModuleOwnerCustom` and `TokenAdminRegistry` contracts.
+
+**1. Registering Admin via Owner**
+
+First, the owner of the token (our EOA in this test setup) needs to nominate themselves (or another designated address) as the pending administrator for the token. This is done by calling the `registerAdminViaOwner(address token)` function on the `RegistryModuleOwnerCustom` contract. The address of this contract is available in the `networkDetails.registryModuleOwnerCustomAddress` field obtained earlier.
+
+We'll need to import the `RegistryModuleOwnerCustom` interface:
 
 ```solidity
-// In CrossChainTest.sol
-// ...
-address owner = vm.makeAddr("owner");
-// ...
+import { RegistryModuleOwnerCustom } from "@ccip/contracts/src/v0.8/ccip/TokenAdminRegistry/RegistryModuleOwnerCustom.sol";
 ```
 
-### The `setUp()` Function: Initializing Forks
-
-The `setUp()` function in Foundry tests is executed before each test case. We use it to initialize our blockchain forks.
+Then, in `setup()`, we make the calls:
 
 ```solidity
-// In CrossChainTest.sol
-function setUp() public {
-  owner = vm.makeAddr("owner"); // Ensure owner is initialized
+// Inside setup()
 
-  sepoliaFork = vm.createSelectFork("sepolia"); // Creates and selects the Sepolia fork
-  arbSepoliaFork = vm.createFork("arb-sepolia"); // Creates the Arbitrum Sepolia fork (but doesn't select it yet)
+// On Sepolia fork
+vm.selectFork(sepoliaFork);
+vm.startPrank(owner);
+RegistryModuleOwnerCustom(sepoliaNetworkDetails.registryModuleOwnerCustomAddress)
+    .registerAdminViaOwner(address(sepoliaToken));
+vm.stopPrank();
 
-  ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
-  vm.makePersistent(address(ccipLocalSimulatorFork)); // Makes the simulator persistent across fork switches
-  // Further CCIP-specific setup, like setting router addresses, might go here
-}
+// On Arbitrum Sepolia fork
+vm.selectFork(arbSepoliaFork);
+vm.startPrank(owner);
+RegistryModuleOwnerCustom(arbSepoliaNetworkDetails.registryModuleOwnerCustomAddress)
+    .registerAdminViaOwner(address(arbSepoliaToken));
+vm.stopPrank();
 ```
 
-- `vm.createSelectFork("sepolia")`: This Foundry cheat code creates a fork of the Sepolia network and immediately makes it the active EVM context for subsequent operations.
+**2. Accepting the Admin Role**
 
-- `vm.createFork("arb-sepolia")`: This creates a fork of Arbitrum Sepolia but doesn't switch to it yet. We'll use `vm.selectFork()` later to switch to this fork.
+After registering as a pending admin, the nominated address (our owner EOA) must finalize the process by accepting the admin role. This is achieved by calling the `acceptAdminRole(address localToken)` function on the `TokenAdminRegistry` contract. The address for this contract is found in `networkDetails.tokenAdminRegistryAddress`.
 
-- `CCIPLocalSimulatorFork`: This contract (not detailed here but assumed to be part of the setup) likely helps simulate CCIP interactions locally. `vm.makePersistent` ensures its state is preserved even when we switch between `sepoliaFork` and `arbSepoliaFork`.
-
-## Deploying Contracts on the Source Chain (Sepolia)
-
-With our environment prepared, we can deploy contracts to our simulated Sepolia chain. Since `setUp()` finished by selecting the `sepoliaFork`, we are currently operating on Sepolia.
-
-### Impersonating the Owner
-
-To ensure contracts are deployed by our designated `owner`, we use Foundry's impersonation cheat codes: `vm.startPrank(address)` and `vm.stopPrank()`. All calls between these two will have `msg.sender` set to the address provided to `vm.startPrank()`.
-
-### Deploying `RebaseToken` on Sepolia
-
-Let's deploy our `RebaseToken`. For this example, the `RebaseToken` constructor is empty as its name and ticker are hardcoded within the contract. It's also `Ownable`, meaning the deployer (our `owner`) will be the initial owner.
-
-This deployment can happen directly in `setUp()` after the fork creation, or within a specific test function. We'll illustrate it as if continuing in `setUp()` or a dedicated deployment section.
+Import the `TokenAdminRegistry` interface:
 
 ```solidity
-// Continuing in setUp() or a dedicated Sepolia deployment logic block:
-// We are currently on the Sepolia fork.
-
-vm.startPrank(owner); // All subsequent calls will be from 'owner'
-
-sepoliaToken = new RebaseToken(); // Deploy RebaseToken on Sepolia
-
-// ... Vault deployment will follow ...
-
-// vm.stopPrank(); // We'll stop the prank after all Sepolia deployments
+import { TokenAdminRegistry } from "@ccip/contracts/src/v0.8/ccip/TokenAdminRegistry/TokenAdminRegistry.sol";
 ```
 
-### Deploying the `Vault` on Sepolia
-
-The `Vault` contract is deployed only on the source chain (Sepolia). Its constructor requires an instance of `IRbaseToken`. Our `sepoliaToken` is of type `RebaseToken`, so we need to cast it to the `IRbaseToken` interface.
+And implement the calls in `setup()`:
 
 ```solidity
-// In Vault.sol (for context, not part of CrossChainTest.sol)
-// interface IRbaseToken { /* ... relevant functions ... */ }
-// contract Vault {
-//     IRbaseToken public i_rebaseToken;
-//     constructor(IRbaseToken _rebaseToken) {
-//         i_rebaseToken = _rebaseToken;
-//     }
-// }
+// Inside setup()
 
-// Continuing in setUp() or a dedicated Sepolia deployment logic block, still under vm.startPrank(owner):
-// sepoliaToken = new RebaseToken(); // Already deployed above
+// On Sepolia fork
+vm.selectFork(sepoliaFork);
+vm.startPrank(owner);
+TokenAdminRegistry(sepoliaNetworkDetails.tokenAdminRegistryAddress)
+    .acceptAdminRole(address(sepoliaToken));
+vm.stopPrank();
 
-vault = new Vault(IRbaseToken(address(sepoliaToken))); // Pass the Sepolia token address, cast to IRbaseToken
-
-vm.stopPrank(); // Crucial to stop impersonating the owner
+// On Arbitrum Sepolia fork
+vm.selectFork(arbSepoliaFork);
+vm.startPrank(owner);
+TokenAdminRegistry(arbSepoliaNetworkDetails.tokenAdminRegistryAddress)
+    .acceptAdminRole(address(arbSepoliaToken));
+vm.stopPrank();
 ```
 
-Casting `address(sepoliaToken)` to `IRbaseToken` allows us to pass our deployed `RebaseToken` instance to the `Vault` constructor, satisfying its type requirement. Ensure the `IRbaseToken` interface is correctly defined and imported in your `Vault.sol` and accessible in your test file if needed for type checking.
+With these two steps, our EOA is now the recognized administrator for `sepoliaToken` and `arbSepoliaToken` within their respective CCIP environments.
 
-## Deploying the Token on the Destination Chain (Arbitrum Sepolia)
+## Linking Tokens to Their Respective Pools
 
-Next, we deploy the corresponding `RebaseToken` on our simulated Arbitrum Sepolia chain.
+The final configuration step covered in this part of the setup (Step 5 in the documentation) is to inform the `TokenAdminRegistry` about which `TokenPool` contract is associated with which token on each chain. This is done by the token administrator (our EOA) calling the `setPool(address localToken, address pool)` function on the `TokenAdminRegistry` contract.
 
-### Switching Forks
-
-First, we must switch the active EVM context to the Arbitrum Sepolia fork we created earlier.
+We already have the `TokenAdminRegistry` imported and its address via `networkDetails`. The implementation is as follows:
 
 ```solidity
-// This can be in setUp() after Sepolia deployments, or in a separate test function.
-// 2. Deploy and configure on Arbitrum Sepolia
-vm.selectFork(arbSepoliaFork); // Switch to the Arbitrum Sepolia fork
+// Inside setup()
 
-vm.startPrank(owner); // Impersonate owner for deployment on Arbitrum Sepolia
+// On Sepolia fork
+vm.selectFork(sepoliaFork);
+vm.startPrank(owner);
+TokenAdminRegistry(sepoliaNetworkDetails.tokenAdminRegistryAddress)
+    .setPool(address(sepoliaToken), address(sepoliaPool));
+vm.stopPrank();
 
-arbSepoliaToken = new RebaseToken(); // Deploy RebaseToken on Arbitrum Sepolia
-
-// ... Token Pool deployment for Arbitrum Sepolia would follow here in a later stage ...
-
-vm.stopPrank(); // Stop impersonating
+// On Arbitrum Sepolia fork
+vm.selectFork(arbSepoliaFork);
+vm.startPrank(owner);
+TokenAdminRegistry(arbSepoliaNetworkDetails.tokenAdminRegistryAddress)
+    .setPool(address(arbSepoliaToken), address(arbSepoliaPool));
+vm.stopPrank();
 ```
 
-The `vm.selectFork(arbSepoliaFork)` call is essential here. Without it, `arbSepoliaToken` would be deployed on the Sepolia fork.
+This links our `RebaseToken` instances to their corresponding `RebaseTokenPool` instances on both the Sepolia and Arbitrum Sepolia forks.
 
-## Essential Foundry Practices for Multi-Chain Testing
+## Next Steps: Configuring Token Pools
 
-Working with multiple simulated chains in Foundry requires attention to a few key practices:
+At this point, we have deployed our core contracts, assigned necessary mint/burn permissions, and established administrative control and linkage for our tokens within the CCIP system.
 
-- **Prank Management:** Always pair `vm.startPrank(address)` with `vm.stopPrank()`. Forgetting to stop a prank can lead to subsequent calls being unintentionally made by the impersonated account, causing hard-to-debug issues. It's good practice to add `vm.stopPrank()` immediately after `vm.startPrank()` and fill in the operations in between.
-
-- **Fork Management:**
-
-  - `vm.createSelectFork(rpcUrlAlias)`: Creates a new fork and immediately switches the EVM context to it.
-
-  - `vm.createFork(rpcUrlAlias)`: Creates a new fork but does not switch to it.
-
-  - `vm.selectFork(forkId)`: Switches the EVM context to an already created fork, identified by its `forkId` (the `uint256` returned by `createFork` or `createSelectFork`).
-
-- **Clarity in Tests:** Use comments and descriptive naming to distinguish between operations on different chains (e.g., `// 1. Deploy and configure on Sepolia`, `sepoliaToken`, `arbSepoliaToken`). This significantly improves the readability and maintainability of your multi-chain tests.
-
-## Next Steps in Your CCIP Journey
-
-With the `RebaseToken` deployed on both simulated chains and the `Vault` deployed on the source chain, we have established the foundational smart contracts. The subsequent steps in configuring this Cross-Chain Token setup for Chainlink CCIP would involve:
-
-1. **Deploying Token Pools:** A token pool contract needs to be deployed on both Sepolia and Arbitrum Sepolia. These pools are critical for CCIP to manage token transfers.
-2. **CCIP Configuration:** This includes:
-
-   - Granting appropriate roles (e.g., minter/burner roles to the token pools or vault).
-
-   - Registering the token pools with the CCIP routers on each chain.
-
-   - Setting supported chains and other CCIP-specific parameters.
-
-These further configurations will enable the actual cross-chain transfer functionality, allowing tokens locked or burned on Sepolia to be minted on Arbitrum Sepolia, and vice-versa, facilitated by Chainlink CCIP.
+The subsequent step in the Chainlink documentation (Step 6) involves "Configuring Token Pools." This typically requires calling the `applyChainUpdates` function on the `TokenPool` contracts themselves to finalize their setup based on the chain-specific parameters and linked tokens. To keep our `setup()` function organized, these configuration calls will be encapsulated in a separate, dedicated function, which will then be invoked from within `setup()`. This will be covered in the continuation of our CCIP test environment setup.
